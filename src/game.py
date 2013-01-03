@@ -67,6 +67,7 @@ class Animation():
         
         # Calculate the number of frames.
         self.frame_count = self.sprite_image.get_width() / frame_width
+        print self.frame_count
         
         # Set up the image size details. Assume that we are using the full
         # height of the image.
@@ -141,40 +142,28 @@ class FrameSprite(pygame.sprite.Sprite):
         """
         if self.visible:
             self.animation.update(current_time)
+            self.image = self.animation.image
 
-    def render(self, target):
+    def draw(self, target):
         """
         Draws the sprite on the target surface. Does nothing if the sprite is
         currently not visible.
         """
         if self.visible:
-            self.image = self.animation.image
             target.blit(self.image, self.rect)
 
     def on_finish(self, animation):
-        self.visible = False
+        if self.play_once:
+            self.visible = False
         
-class Asteroid(pygame.sprite.Sprite):
+class Asteroid(FrameSprite):
     
     spriteImage = None
     frames = None
     
-    def __init__(self, imagename):
-        pygame.sprite.Sprite.__init__(self)
+    def __init__(self, imagename, frame_width, speed):
+        FrameSprite.__init__(self, imagename, frame_width, speed)
         
-        if self.spriteImage == None:
-            self.spriteImage = pygame.image.load(imagename).convert_alpha()
-            
-        if self.frames == None:
-            self.frames = []
-            for offset in [0, 64, 128, 192]:
-                frame = self.spriteImage.subsurface(Rect(offset, 0, 64, 64))
-                self.frames.append(frame)
-            
-        self.frame_counter = 0
-        self.frame_time = 0
-        self.max_frames = 4
-
         self.rect = Rect(0, 0, 64, 64)
         self.rect.top = (0 - self.rect.height) * random.randint(1, 10)
         self.rect.left = random.randint(0, 800)
@@ -185,13 +174,7 @@ class Asteroid(pygame.sprite.Sprite):
         self.next_update_time = 0 # update() hasn't been called yet.
         
     def update(self, current_time, bottom):
-        # Update every 10 milliseconds = 1/100th of a second.
-        if self.frame_time < current_time:
-            self.image = self.frames[self.frame_counter]
-            self.frame_counter = self.frame_counter + 1
-            if self.frame_counter > self.max_frames - 1:
-                self.frame_counter = 0
-            self.frame_time = current_time + 100
+        FrameSprite.update(self, current_time)
                 
         if self.next_update_time < current_time:
 
@@ -201,8 +184,6 @@ class Asteroid(pygame.sprite.Sprite):
                 self.rect.left = random.randint(0, 800)
         
             self.rect.left = self.rect.left + self.drift
-            #if random.randint(0, 100) > 95:
-            #    self.drift = random.randint(-2, 2)
                 
             # Move our position down by one pixel
             self.rect.top += self.speed
@@ -214,16 +195,14 @@ class Asteroids():
     def __init__(self, imagename):
         self.roids = pygame.sprite.Group()
         for i in range(20):
-            self.roids.add(Asteroid(imagename))
+            self.roids.add(Asteroid(imagename, 64, 10))
 
     def update(self, current_time):
         self.roids.update(current_time, 864)
     
-    def render(self, target):
+    def draw(self, target):
         rectlist = self.roids.draw(target)
         pygame.display.update(rectlist)
-        #for asteroid in self.roids:
-        #    target.blit(asteroid.image, asteroid.rect)
     
 class Ship(pygame.sprite.Sprite):
     """
@@ -306,7 +285,7 @@ class Game(object):
         self.next_update_time = 0
         
         # Prepare the player's ship
-        self.ship = Ship(os.path.join("graphics", "ship_01.png"), 400 - 32, 800 - 64, pygame.Rect(0, 800 - 500, 800 - 64, 500))
+        self.ship = Ship(os.path.join("graphics", "ship_01.png"), 400 - 32, 800 - 64, pygame.Rect(0, 800 - 64, 800 - 64, 64))
         self.explosion = FrameSprite(os.path.join("graphics", "explosion_01.png"), 64, 10)
         self.explosion.play_once = True
         self.explosion.visible = False
@@ -406,10 +385,10 @@ class Game(object):
         # Draw the ship
         self.ship.render(self.display)
         if self.explosion.visible:
-            self.explosion.render(self.display)
+            self.explosion.draw(self.display)
 
         # Draw the asteroids
-        self.asteroids.render(self.display)
+        self.asteroids.draw(self.display)
         
         # Update the display
         pygame.display.update()
