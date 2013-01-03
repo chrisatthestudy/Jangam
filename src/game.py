@@ -9,14 +9,12 @@ import random
 import pygame
 from pygame.locals import *
 
-import ui
-
 # ==============================================================================
 
 class ParallaxScroller():
     """
-    Implements a scrolling area of the screen, wrapping around at the top and
-    bottom edges.
+    Implements a vertically scrolling area of the screen, wrapping around at the 
+    top and bottom edges.
     """
     def __init__(self, imagename, x, y, speed):
         self.image = pygame.image.load(imagename).convert_alpha()
@@ -308,21 +306,15 @@ class Game(object):
         self.next_update_time = 0
         
         # Prepare the player's ship
-        self.ship = Ship(os.path.join("graphics", "ship_02.png"), 400 - 32, 800 - 64, pygame.Rect(0, 800 - 500, 800 - 64, 500))
+        self.ship = Ship(os.path.join("graphics", "ship_01.png"), 400 - 32, 800 - 64, pygame.Rect(0, 800 - 500, 800 - 64, 500))
         self.explosion = FrameSprite(os.path.join("graphics", "explosion_01.png"), 64, 10)
         self.explosion.play_once = True
         self.explosion.visible = False
         self.ship.collided = False
         
         # Prepare the asteroids
-        self.asteroids = Asteroids(os.path.join("graphics", "asteroid_frames_02.png"))
+        self.asteroids = Asteroids(os.path.join("graphics", "asteroid_frames_01.png"))
         
-        # Set up the UI handler
-        self.screen = ui.Screen(None, "Screen", 0, 0, 800, 800)
-        self.screen.on_keydown = self.on_keydown
-        self.screen.on_keyup = self.on_keyup
-        self.quitBtn = ui.Button(self.screen, "QuitBtn", "Quit", 800 - 80, 800 - 24, 80, 24, self.on_quit)
-    
     # --------------------------------------------------------------------------
     
     def startup(self):
@@ -382,11 +374,23 @@ class Game(object):
         if self.ship.collided:
             self.explosion.update(current_time)
     
-        # Update the top-most UI container -- all the others will be updated
-        # by this
-        self.screen.update()
-        if not self.screen.active:
-            self.running = False
+        # Handle the pygame events
+        for event in pygame.event.get():
+            if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
+                self.running = False
+            elif (event.type == KEYDOWN):
+                self.on_keydown(event.key)
+            elif (event.type == KEYUP):
+                self.on_keyup(event.key)
+            elif event.type == MOUSEBUTTONDOWN:
+                # self.mouse_down(pygame.mouse.get_pos())
+                pass
+            elif event.type == MOUSEBUTTONUP:
+                # self.mouse_up(pygame.mouse.get_pos())
+                pass
+            elif event.type == MOUSEMOTION:
+                # self.mouse_moved(pygame.mouse.get_pos())
+                pass
 
     # --------------------------------------------------------------------------
     
@@ -407,9 +411,6 @@ class Game(object):
         # Draw the asteroids
         self.asteroids.render(self.display)
         
-        # Draw the UI
-        self.screen.blit(self.display)
-
         # Update the display
         pygame.display.update()
         
