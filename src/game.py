@@ -9,7 +9,7 @@ import random
 import pygame
 from pygame.locals import *
 
-class ParallaxScroller():
+class ParallaxScroller(object):
     """
     Implements a vertically scrolling area of the screen, wrapping around at the 
     top and bottom edges. For this game this is used for the star-fields in the
@@ -31,7 +31,7 @@ class ParallaxScroller():
         target.blit(self.image, [int(self.x), int(self.y)])
         target.blit(self.image, [int(self.x), int(self.y) - self.h])
 
-class Animation():
+class Animation(object):
     """
     Implements an animated image, for use by sprites, which can retrieve the
     current animation frame from the 'image' variable, calling the 'update()'
@@ -192,7 +192,7 @@ class Asteroid(FrameSprite):
 
             self.next_update_time = current_time + 10
 
-class Asteroids():
+class Asteroids(object):
     
     def __init__(self, imagename):
         self.roids = pygame.sprite.Group()
@@ -241,7 +241,7 @@ class Pulse(FrameSprite):
                 
             self.next_update_time = current_time + 1
 
-class WeaponFire():
+class WeaponFire(object):
     """
     Base class for handling weapon-fire, using the Pulse class (above) for the
     sprites that represent the visible appearance. The WeaponFire class is
@@ -353,14 +353,14 @@ class Game(object):
     """
     
     def __init__(self):
-        logging.basicConfig(filename='thegame.log', format='%(asctime)s %(message)s', level=logging.INFO)
+        logging.basicConfig(filename='jangam.log', format='%(asctime)s %(message)s', level=logging.INFO)
         logging.info("Start up")
         
         pygame.init()
         
         # Prepare the main display
         self.display = pygame.display.set_mode((800, 800))
-        pygame.display.set_caption("TheGame")
+        pygame.display.set_caption("Jangam")
         
         # Prepare the animations
         self.backdrop = pygame.image.load(os.path.join("graphics", "stars_00.png")).convert()
