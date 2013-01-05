@@ -9,6 +9,16 @@ import random
 import pygame
 from pygame.locals import *
 
+# Some pseudo-constants
+SCREEN_TOP = 16
+SCREEN_BOTTOM = 695
+SCREEN_LEFT = 16
+SCREEN_RIGHT = 784
+
+SHIP_Y = SCREEN_BOTTOM - 64
+SPEEDBAR_X = 400
+SPEEDBAR_Y = 800 - 32
+
 class ParallaxScroller(object):
     """
     Implements a vertically scrolling area of the screen, wrapping around at the 
@@ -75,7 +85,8 @@ class Animation(object):
         self.frame_width = frame_width
         self.frame_height = self.sprite_image.get_height()
         
-        # Extract the frames into a list of sub-surfaces
+        # Extract the frames into a list of sub-surfaces, as this is more
+        # efficient than creating an image for each frame.
         self.frames = []
         for frame in range(0, self.frame_count):
             offset = frame * self.frame_width
@@ -217,7 +228,7 @@ class Pulse(FrameSprite):
 
         # Set the default position, at the front of the ship (the X co-ordinate
         # representing the ship position will be set via the WeaponFire class).
-        self.rect = Rect(0, 800 - 64, 8, 8)
+        self.rect = Rect(0, SHIP_Y, 8, 8)
 
         # The speed of each pulse is randomised slightly for a better visual
         # effect (without this the pulses look like a fixed line, because they
@@ -287,11 +298,73 @@ class WeaponFire(object):
     def on_pulse_die(self, pulse):
         # The pulse has gone off-screen, so remove it
         self.pulses.remove(pulse)
+
+class Burst(FrameSprite):
+    """
+    A Burst is the visual representation of an explosion. It is a simple frame
+    sprite which doesn't move.
+    """
+    
+    def __init__(self, image, frame_width, speed, on_die = None):
+        FrameSprite.__init__(self, image, frame_width, speed)
+        self.play_once = True
+        self.on_die = on_die
+        self.animation.on_cycle = self.on_finish
+
+    def on_finish(self, animation):
+        self.visible = False
+        if self.on_die:
+            self.on_die(self)
+
+class Explosions(object):
+    """
+    A class for handling explosions in the game. This works very similarly to
+    the WeaponFire class, except that the sprites that it handles to not move.
+    """
+
+    # Position is the point from which the weapon pulses will emanate. This
+    # must be set externally before the weapon is fired.
+    position = 0
+    
+    def __init__(self, imagename):
+        # Store the 'burst' sprites in a sprite group for efficiency
+        self.bursts = pygame.sprite.Group()
+        
+        # Use the same image for all the 'burst' sprites
+        self.imagename = imagename
+        self.sprite_image = pygame.image.load(self.imagename).convert_alpha()
+
+    def add(self, position):
+        """
+        Adds a new explosion at the specified co-ordinates
+        """
+        burst = Burst(self.sprite_image, 64, 10, self.on_burst_die)
+        burst.rect.left = position.left
+        burst.rect.top = position.top
+        self.bursts.add(burst)
+        
+    def update(self, current_time):
+        # Update any existing pulses            
+        self.bursts.update(current_time)
+    
+    def draw(self, target):
+        # Update the 'bursts' sprite-group (this will redraw all the sprites in
+        # the group)
+        rectlist = self.bursts.draw(target)
+        pygame.display.update(rectlist)
+
+    def on_burst_die(self, burst):
+        # The burst has finished, so remove it
+        self.bursts.remove(burst)
         
 class Ship(pygame.sprite.Sprite):
     """
     Controls and displays the player's ship
     """
+    
+    max_speed = 10
+    acceleration = 0.05
+    braking = 0.05
     
     def __init__(self, imagename, x, y, container_rect):
         self.image = pygame.image.load(imagename).convert_alpha()
@@ -300,45 +373,69 @@ class Ship(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.topleft = (self.x, self.y)
         self.container_rect = container_rect.copy()
-        self.thrust_x = 0
-        self.thrust_y = 0
+        self.thrust_left = 0
+        self.thrust_right = 0
+        self.speed = 0.0
         self.powered = False
         
     def update(self):
-        x = self.rect.left + self.thrust_x
-        y = self.rect.top + self.thrust_y
+        if abs(self.speed) < self.max_speed:
+            self.speed = self.speed + self.thrust_right
+            self.speed = self.speed - self.thrust_left
+        x = self.rect.left + self.speed
+
         if x >= self.container_rect.left and x <= self.container_rect.right:
             self.rect.left = x
-           
-        if y >= self.container_rect.top and y <= self.container_rect.bottom:
-            self.rect.top = y
-
-        if not self.powered:
-            if self.thrust_x > 0:
-                self.thrust_x = self.thrust_x - 1
-            if self.thrust_x < 0:
-                self.thrust_x = self.thrust_x + 1
-                
-            if self.thrust_y > 0:
-                self.thrust_y = self.thrust_y - 1
-            if self.thrust_y < 0:
-                self.thrust_y = self.thrust_y + 1
+        else:
+            self.speed = 0
+            
+        if self.speed > self.braking and self.thrust_right == 0:
+            self.speed = self.speed - self.braking
+            if self.speed < self.braking:
+                self.speed = 0
+        elif self.speed < -self.braking and self.thrust_left == 0:
+            self.speed = self.speed + self.braking
+            if self.speed > -self.braking:
+                self.speed = 0
             
     def render(self, target):
         target.blit(self.image, self.rect)
 
-    def apply_thrust(self, x, y):
-        self.thrust_x = self.thrust_x + x
-        self.thrust_y = self.thrust_y + y
-        if x <> 0 or y <> 0:
-            self.powered = True
+    def apply_thrust_left(self, amount = 0):
+        if amount == 0:
+            amount = self.acceleration
+        self.thrust_left = self.thrust_left + amount
+        
+    def apply_thrust_right(self, amount = 0):
+        if amount == 0:
+            amount = self.acceleration
+        self.thrust_right = self.thrust_right + amount
 
-    def release_thrust(self, x, y):
-        self.powered = False
+    def release_thrust_left(self):
+        self.thrust_left = 0
+        
+    def release_thrust_right(self):
+        self.thrust_right = 0
         
     def stop(self):
-        self.thrust_x = 0
-        self.thrust_y = 0
+        self.thrust_left = 0
+        self.thrust_right = 0
+    
+class Speedbar():
+    """
+    Draws a speedbar on-screen
+    """
+    
+    def __init__(self, rect):
+        self.rect = rect
+        self.speed = 0
+        
+    def update(self, speed):
+        self.speed = speed * 10
+    
+    def draw(self, target):
+        self.rect.width = abs(int(self.speed))
+        target.fill(pygame.color.Color('#ff0000'), self.rect)
     
 class Game(object):
     """
@@ -363,23 +460,29 @@ class Game(object):
         pygame.display.set_caption("Jangam")
         
         # Prepare the animations
-        self.backdrop = pygame.image.load(os.path.join("graphics", "stars_00.png")).convert()
         self.scrollers = []
-        self.scrollers.append(ParallaxScroller(os.path.join("graphics", "stars_01.png"), 0, 0, 0.1))
+        self.scrollers.append(ParallaxScroller(os.path.join("graphics", "starfield_01a.png"), 0, 0, 0.1))
+        self.scrollers.append(ParallaxScroller(os.path.join("graphics", "starfield_01b.png"), 0, 0, 0.2))
+        self.scrollers.append(ParallaxScroller(os.path.join("graphics", "starfield_01c.png"), 0, 0, 0.3))
         self.next_update_time = 0
         
         # Prepare the player's ship
-        self.ship = Ship(os.path.join("graphics", "ship_01.png"), 400 - 32, 800 - 64, pygame.Rect(0, 800 - 64, 800 - 64, 64))
-        self.explosion = FrameSprite(os.path.join("graphics", "explosion_01.png"), 64, 10)
-        self.explosion.play_once = True
-        self.explosion.visible = False
+        self.ship = Ship(os.path.join("graphics", "ship_01.png"), 400 - 32, SHIP_Y, pygame.Rect(0, SHIP_Y, 800 - 64, 64))
         self.ship.collided = False
+
+        self.explosions = Explosions(os.path.join("graphics", "explosion_01.png"))
         
         self.weapon = WeaponFire(os.path.join("graphics", "weapon_01.png"))
         self.weapon.firing = False
         
         # Prepare the asteroids
         self.asteroids = Asteroids(os.path.join("graphics", "asteroid_frames_01.png"))
+        
+        # Prepare the UI screen
+        self.overlay = pygame.image.load(os.path.join("graphics", "screen_01.png")).convert_alpha()
+        
+        # Prepare the status bars
+        self.speedbar = Speedbar(Rect(SPEEDBAR_X, SPEEDBAR_Y, 400, 8))
         
     # --------------------------------------------------------------------------
     
@@ -393,10 +496,10 @@ class Game(object):
 
     def on_keydown(self, key):
         if key == K_LEFT:
-            self.ship.apply_thrust(-1, 0)
+            self.ship.apply_thrust_left()
             
         if key == K_RIGHT:
-            self.ship.apply_thrust(1, 0)
+            self.ship.apply_thrust_right()
                 
         if key == K_UP:
             # TODO: Change weapon
@@ -412,8 +515,11 @@ class Game(object):
     # --------------------------------------------------------------------------
 
     def on_keyup(self, key):
-        if key == K_RIGHT or key == K_LEFT:
-            self.ship.release_thrust(0, 0)
+        if key == K_RIGHT:
+            self.ship.release_thrust_right()
+            
+        if key == K_LEFT:
+            self.ship.release_thrust_left()
             
         if key == K_SPACE:
             self.weapon.firing = False        
@@ -435,6 +541,8 @@ class Game(object):
         # Update the ship position
         self.ship.update()
         
+        self.speedbar.update(self.ship.speed)
+        
         # Update the asteroid positions
         self.asteroids.update(current_time)
         
@@ -448,19 +556,16 @@ class Game(object):
         if collision:
             # Show explosion
             self.ship.collided = True
-            self.explosion.rect = collision[0].rect
-            self.explosion.visible = True
+            self.explosions.add(collision[0].rect)
 
         # Check for hitting asteroids with weapon-fire
         for pulse in self.weapon.pulses:
             collision = pygame.sprite.spritecollide(pulse, self.asteroids.roids, True)
             if collision:
                 # Show explosion
-                self.explosion.rect = pulse.rect
-                self.explosion.visible = True
+                self.explosions.add(pulse.rect)
 
-        if self.ship.collided:
-            self.explosion.update(current_time)
+        self.explosions.update(current_time)
     
         # Handle the pygame events
         for event in pygame.event.get():
@@ -487,20 +592,25 @@ class Game(object):
         Main routine for drawing the display.
         """
         # Draw the animations
-        self.display.blit(self.backdrop, [0, 0])
         for scroller in self.scrollers:
             scroller.render(self.display)
         
         # Draw the ship
         self.ship.render(self.display)
-        if self.explosion.visible:
-            self.explosion.draw(self.display)
+
+        self.explosions.draw(self.display)
 
         # Draw the asteroids
         self.asteroids.draw(self.display)
         
         # Draw the weapon fire
         self.weapon.draw(self.display)
+
+        # Update the UI
+        self.display.blit(self.overlay, [0, 0])
+        
+        # Update the status bars
+        self.speedbar.draw(self.display)
         
         # Update the display
         pygame.display.update()
