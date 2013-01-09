@@ -20,6 +20,8 @@ SHIP_Y = SCREEN_BOTTOM - 64
 SPEEDBAR_X = 400
 SPEEDBAR_Y = 800 - 32
 
+from time import clock
+
 class GraphicStore(object):
     """
     Loads and stores all the graphics used in the game. The graphics are stored
@@ -670,21 +672,8 @@ class Game(object):
         # Check for hitting asteroids with a miner
         for mine in self.mines.mines:
             if not mine.is_mining:
-                collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False)
-                if collision:
-                    # Ignore all collisions except the first one
-                    roid = collision[0]
-                    # There is clearly something that I don't understand about
-                    # Pygame's collision-detection, because I regularly get
-                    # collisions reported which are clearly erroneous. For now
-                    # I will do a simplistic check to weed these out.
-                    if roid.rect.left < mine.rect.left - 64 or roid.rect.left > mine.rect.left + 64:
-                        """
-                        print "Invalid collision!",
-                        print roid.rect.left, mine.rect.left
-                        """
-                        pass
-                    else:
+                for roid in self.asteroids.roids:
+                    if abs(mine.rect.left - roid.rect.left) < 40 and abs(mine.rect.top - roid.rect.top) < 40:
                         roid.being_mined = True
                         mine.is_mining = True
                         mine.rect.left = roid.rect.left
@@ -721,18 +710,19 @@ class Game(object):
         for scroller in self.scrollers:
             scroller.render(self.display)
         
-        # Draw the mines
+        # Draw any active mines
         self.mines.draw(self.display)
 
         # Draw the ship
         self.ship.draw(self.display)
 
+        # Draw any active explosions
         self.explosions.draw(self.display)
 
         # Draw the asteroids
         self.asteroids.draw(self.display)
         
-        # Draw the weapon fire
+        # Draw any active weapon fire
         self.weapon.draw(self.display)
         
         # Update the UI
