@@ -20,7 +20,7 @@ SHIP_Y = SCREEN_BOTTOM - 64
 SPEEDBAR_X = 400
 SPEEDBAR_Y = 800 - 32
 
-from time import clock
+#from time import clock
 
 class GraphicStore(object):
     """
@@ -191,7 +191,7 @@ class Asteroid(FrameSprite):
     spriteImage = None
     frames = None
     being_mined = False
-    radius = 48
+    radius = 32
     
     def __init__(self, image, frame_width, speed, on_die):
         FrameSprite.__init__(self, image, frame_width, speed)
@@ -333,15 +333,15 @@ class Mine(FrameSprite):
     is_mining = False
     mine_time = 1000
     asteroid = None
-    radius = 48
+    radius = 12
     
     def __init__(self, image, on_die):
-        FrameSprite.__init__(self, image, 64, 10)
+        FrameSprite.__init__(self, image, 24, 10)
 
         # Set the default position, at the front of the ship (the X co-ordinate
         # representing the ship position will be set via the MineController
         # class).
-        self.rect = Rect(0, SHIP_Y, 64, 64)
+        self.rect = Rect(0, SHIP_Y, 24, 24)
 
         self.speed = 1
         
@@ -363,7 +363,7 @@ class Mine(FrameSprite):
                 # Move us up the screen
                 self.rect.top -= self.speed
                 
-                if self.rect.top < -64:
+                if self.rect.top < -24:
                     self.on_die(self)
                 
             self.next_update_time = current_time + 1
@@ -474,6 +474,7 @@ class Ship(FrameSprite):
         self.y = y
         self.rect = self.image.get_rect()
         self.rect.topleft = (self.x, self.y)
+        self.rect.width = 64
         self.container_rect = container_rect.copy()
         self.thrust_left = 0
         self.thrust_right = 0
@@ -672,13 +673,14 @@ class Game(object):
         # Check for hitting asteroids with a miner
         for mine in self.mines.mines:
             if not mine.is_mining:
-                for roid in self.asteroids.roids:
-                    if abs(mine.rect.left - roid.rect.left) < 40 and abs(mine.rect.top - roid.rect.top) < 40:
-                        roid.being_mined = True
-                        mine.is_mining = True
-                        mine.rect.left = roid.rect.left
-                        mine.rect.top  = roid.rect.top + roid.rect.height - 8
-                        mine.asteroid = roid
+                collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False, pygame.sprite.collide_circle)
+                if collision:
+                    roid = collision[0]
+                    roid.being_mined = True
+                    mine.is_mining = True
+                    mine.rect.left = roid.rect.left + 20
+                    mine.rect.top  = roid.rect.top + roid.rect.height - 8
+                    mine.asteroid = roid
         
         self.explosions.update(current_time)
     
