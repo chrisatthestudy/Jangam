@@ -334,8 +334,9 @@ class Mine(FrameSprite):
     mine_time = 1000
     asteroid = None
     radius = 12
+    clouds = None
     
-    def __init__(self, image, on_die):
+    def __init__(self, image, cloud_image, on_die):
         FrameSprite.__init__(self, image, 24, 10)
 
         # Set the default position, at the front of the ship (the X co-ordinate
@@ -349,12 +350,16 @@ class Mine(FrameSprite):
         
         self.on_die = on_die
         
+        self.clouds = FrameSprite(cloud_image, 32, 10)
+        self.clouds.visible = False
+        
     def update(self, current_time):
         FrameSprite.update(self, current_time)
                 
         if self.next_update_time < current_time:
 
             if self.is_mining:
+                self.clouds.update(current_time)
                 self.mine_time = self.mine_time - 1
                 if self.mine_time < 1:
                     self.on_die(self)
@@ -368,18 +373,31 @@ class Mine(FrameSprite):
                 
             self.next_update_time = current_time + 1
 
+    def draw_clouds(self, target):
+        if self.is_mining:
+            self.clouds.draw(target)
+
+    def start_mining(self):
+        self.is_mining = True
+        self.clouds.rect = Rect(self.rect)
+        self.clouds.rect.width = 32
+        self.clouds.rect.left = self.clouds.rect.left - 4
+        self.clouds.rect.top = self.rect.top - 16
+        self.clouds.visible = True
+        
 class MineController(object):
     """
     Base class for handling the Mines, using the Mine class (above) for the
     sprites that represent the visible appearance.
     """
 
-    def __init__(self, image):
+    def __init__(self, image, cloud_image):
         # Store the 'mine' sprites in a sprite group for efficiency
         self.mines = pygame.sprite.Group()
         
         # Use the same image for all the 'mine' sprites
         self.sprite_image = image
+        self.cloud_image = cloud_image
             
     def update(self, current_time):
         # Update any existing mines            
@@ -387,7 +405,7 @@ class MineController(object):
 
     def launch(self, position):
         # Launch a mine
-        mine = Mine(self.sprite_image, self.on_mine_die)
+        mine = Mine(self.sprite_image, self.cloud_image, self.on_mine_die)
         mine.rect = position
         self.mines.add(mine)
         
@@ -396,6 +414,7 @@ class MineController(object):
         # the group)
         rectlist = self.mines.draw(target)
         pygame.display.update(rectlist)
+        [mine.draw_clouds(target) for mine in self.mines]
 
     def on_mine_die(self, mine):
         # The mine has gone off-screen, so remove it
@@ -579,7 +598,7 @@ class Game(object):
         self.weapon = WeaponFire(graphics["weapon_01"])
         self.weapon.firing = False
         
-        self.mines = MineController(graphics["miner_frames_01"])
+        self.mines = MineController(graphics["miner_frames_01"], graphics["cloud_frames_01"])
         
         # Prepare the asteroids
         self.asteroids = Asteroids(graphics["asteroid_01"])
@@ -677,10 +696,10 @@ class Game(object):
                 if collision:
                     roid = collision[0]
                     roid.being_mined = True
-                    mine.is_mining = True
                     mine.rect.left = roid.rect.left + 20
                     mine.rect.top  = roid.rect.top + roid.rect.height - 8
                     mine.asteroid = roid
+                    mine.start_mining()
         
         self.explosions.update(current_time)
     
@@ -712,9 +731,6 @@ class Game(object):
         for scroller in self.scrollers:
             scroller.render(self.display)
         
-        # Draw any active mines
-        self.mines.draw(self.display)
-
         # Draw the ship
         self.ship.draw(self.display)
 
@@ -724,6 +740,9 @@ class Game(object):
         # Draw the asteroids
         self.asteroids.draw(self.display)
         
+        # Draw any active mines
+        self.mines.draw(self.display)
+
         # Draw any active weapon fire
         self.weapon.draw(self.display)
         
