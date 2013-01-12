@@ -28,7 +28,7 @@ class GraphicStore(object):
     in a dictionary keyed on the name (without extension) of the graphic.
     """
     
-    def __init__(self, path):
+    def load(self, path):
         """
         Loads all the graphics from the specified path.
         """
@@ -41,7 +41,21 @@ class GraphicStore(object):
   
     def __getitem__(self, key):
         return self.items[key]
-        
+
+# ==============================================================================
+# g_store: GLOBAL VARIABLE!!!!
+# ==============================================================================
+# The GraphicsStore() class is used by many of the sprite classes. Rather than
+# have them each create their own (which would defeat the purpose of the class,
+# which is to prevent creating multiple instances of shared graphics), or having
+# an instance created in the main Game class and then passed to each sprite
+# class as a parameter (which seems clumsy), this global instance is available
+# to all the classes. Each class knows which graphics it needs.
+#
+# This variable is actually initialised in the Game() class, as pygame.display
+# has to be initialised before the class can be created.
+g_store = GraphicStore()
+
 class ParallaxScroller(object):
     """
     Implements a vertically scrolling area of the screen, wrapping around at the 
@@ -81,7 +95,7 @@ class Animation(object):
     on_cycle = None
     rect = None
     
-    def __init__(self, image, frame_width, speed, on_cycle = None):
+    def __init__(self, image, speed, on_cycle = None):
         """
         Initialises the sprite, loading the base image and extracting the
         frames.
@@ -94,12 +108,16 @@ class Animation(object):
         """
         self.sprite_image = image
         
+        # All the sprite frames in this game are square and laid out
+        # horizontally in the image, so the size of each frame can be read
+        # from the height of the image.
+        self.frame_width = image.get_height()
+        
         # Calculate the number of frames.
-        self.frame_count = self.sprite_image.get_width() / frame_width
+        self.frame_count = self.sprite_image.get_width() / self.frame_width
         
         # Set up the image size details. Assume that we are using the full
         # height of the image.
-        self.frame_width = frame_width
         self.frame_height = self.sprite_image.get_height()
         
         # Extract the frames into a list of sub-surfaces, as this is more
@@ -107,7 +125,7 @@ class Animation(object):
         self.frames = []
         for frame in range(0, self.frame_count):
             offset = frame * self.frame_width
-            frame = self.sprite_image.subsurface(Rect(offset, 0, frame_width, frame_width))
+            frame = self.sprite_image.subsurface(Rect(offset, 0, self.frame_width, self.frame_width))
             self.frames.append(frame)
             
         # Prepare the first frame.
@@ -149,16 +167,16 @@ class FrameSprite(pygame.sprite.Sprite):
     frames = None
     animation = None
     
-    def __init__(self, image, frame_width, speed):
+    def __init__(self, image, speed):
         """
         Initialises the sprite, setting up an Animation instance to handle the
         actual animation. See the Animation class for the meaning of the
         parameters (these are passed directly on to the Animation class).
         """
         pygame.sprite.Sprite.__init__(self)
-        
+
         # Set up the animation handler
-        self.animation = Animation(image, frame_width, speed, self.on_finish)
+        self.animation = Animation(image, speed, self.on_finish)
         self.rect = self.animation.rect
         self.image = self.animation.image
         
@@ -191,10 +209,10 @@ class Asteroid(FrameSprite):
     spriteImage = None
     frames = None
     being_mined = False
-    radius = 32
+    radius = 28
     
-    def __init__(self, image, frame_width, speed, on_die):
-        FrameSprite.__init__(self, image, frame_width, speed)
+    def __init__(self, on_die):
+        FrameSprite.__init__(self, g_store["asteroid_01"], 10)
         
         self.rect = Rect(0, 0, 64, 64)
         self.rect.top = (0 - self.rect.height) * random.randint(1, 10)
@@ -213,6 +231,7 @@ class Asteroid(FrameSprite):
         if self.next_update_time < current_time:
 
             if self.being_mined:
+                # Asteroids which are being mined do not move
                 pass
             else:
                 # If we're at the bottom of the screen, move us back to the top.
@@ -229,10 +248,10 @@ class Asteroid(FrameSprite):
 
 class Asteroids(object):
     
-    def __init__(self, image):
+    def __init__(self):
         self.roids = pygame.sprite.Group()
         for i in range(50):
-            self.roids.add(Asteroid(image, 64, 10, self.on_roid_die))
+            self.roids.add(Asteroid(self.on_roid_die))
 
     def update(self, current_time):
         self.roids.update(current_time, 864)
@@ -250,8 +269,8 @@ class Pulse(FrameSprite):
     this game weapon-fire is always assumed to travel vertically.
     """
     
-    def __init__(self, image, on_die):
-        FrameSprite.__init__(self, image, 8, 10)
+    def __init__(self, on_die):
+        FrameSprite.__init__(self, g_store["weapon_01"], 10)
 
         # Set the default position, at the front of the ship (the X co-ordinate
         # representing the ship position will be set via the WeaponFire class).
@@ -295,21 +314,18 @@ class WeaponFire(object):
     position = 0
     firing = False
     
-    def __init__(self, image):
+    def __init__(self):
         # Always start with the weapon inactive
         self.firing = False
         
         # Store the 'pulse' sprites in a sprite group for efficiency
         self.pulses = pygame.sprite.Group()
         
-        # Use the same image for all the 'pulse' sprites
-        self.sprite_image = image
-            
     def update(self, current_time):
         if self.firing:
             # Create another pulse, place it at the current weapon position, and
             # add it to the sprite group.
-            pulse = Pulse(self.sprite_image, self.on_pulse_die)
+            pulse = Pulse(self.on_pulse_die)
             pulse.rect.left = self.position
             self.pulses.add(pulse)
         # Update any existing pulses            
@@ -336,8 +352,8 @@ class Mine(FrameSprite):
     radius = 12
     clouds = None
     
-    def __init__(self, image, cloud_image, on_die):
-        FrameSprite.__init__(self, image, 24, 10)
+    def __init__(self, on_die):
+        FrameSprite.__init__(self, g_store["miner_frames_01"], 10)
 
         # Set the default position, at the front of the ship (the X co-ordinate
         # representing the ship position will be set via the MineController
@@ -350,7 +366,7 @@ class Mine(FrameSprite):
         
         self.on_die = on_die
         
-        self.clouds = FrameSprite(cloud_image, 32, 10)
+        self.clouds = FrameSprite(g_store["cloud_frames_01"], 10)
         self.clouds.visible = False
         
     def update(self, current_time):
@@ -391,21 +407,17 @@ class MineController(object):
     sprites that represent the visible appearance.
     """
 
-    def __init__(self, image, cloud_image):
+    def __init__(self):
         # Store the 'mine' sprites in a sprite group for efficiency
         self.mines = pygame.sprite.Group()
         
-        # Use the same image for all the 'mine' sprites
-        self.sprite_image = image
-        self.cloud_image = cloud_image
-            
     def update(self, current_time):
         # Update any existing mines            
         self.mines.update(current_time)
 
     def launch(self, position):
         # Launch a mine
-        mine = Mine(self.sprite_image, self.cloud_image, self.on_mine_die)
+        mine = Mine(self.on_mine_die)
         mine.rect = position
         self.mines.add(mine)
         
@@ -426,8 +438,8 @@ class Burst(FrameSprite):
     sprite which doesn't move.
     """
     
-    def __init__(self, image, frame_width, speed, on_die = None):
-        FrameSprite.__init__(self, image, frame_width, speed)
+    def __init__(self, on_die = None):
+        FrameSprite.__init__(self, g_store["explosion_frames_01"], 10)
         self.play_once = True
         self.on_die = on_die
         self.animation.on_cycle = self.on_finish
@@ -447,18 +459,15 @@ class Explosions(object):
     # must be set externally before the weapon is fired.
     position = 0
     
-    def __init__(self, image):
+    def __init__(self):
         # Store the 'burst' sprites in a sprite group for efficiency
         self.bursts = pygame.sprite.Group()
         
-        # Use the same image for all the 'burst' sprites
-        self.sprite_image = image
-
     def add(self, position):
         """
         Adds a new explosion at the specified co-ordinates
         """
-        burst = Burst(self.sprite_image, 64, 10, self.on_burst_die)
+        burst = Burst(self.on_burst_die)
         burst.rect.left = position.left
         burst.rect.top = position.top
         self.bursts.add(burst)
@@ -482,13 +491,12 @@ class Ship(FrameSprite):
     Controls and displays the player's ship
     """
     
-    max_speed = 10
+    max_speed = 2
     acceleration = 0.05
     braking = 0.05
     
-    def __init__(self, image, x, y, container_rect):
-        FrameSprite.__init__(self, image, 64, 10)
-        self.image = image
+    def __init__(self, x, y, container_rect):
+        FrameSprite.__init__(self, g_store["ship_01"], 10)
         self.x = x
         self.y = y
         self.rect = self.image.get_rect()
@@ -572,7 +580,6 @@ class Game(object):
     
     def __init__(self):
         logging.basicConfig(filename='jangam.log', format='%(asctime)s %(message)s', level=logging.INFO)
-        logging.info("Start up")
         
         pygame.init()
         
@@ -580,31 +587,31 @@ class Game(object):
         self.display = pygame.display.set_mode((800, 800))
         pygame.display.set_caption("Jangam")
         
-        graphics = GraphicStore("graphics")
+        g_store.load("graphics")
         
         # Prepare the animations
         self.scrollers = []
-        self.scrollers.append(ParallaxScroller(graphics["starfield_01a"], 0, 0, 0.1))
-        self.scrollers.append(ParallaxScroller(graphics["starfield_01b"], 0, 0, 0.2))
-        self.scrollers.append(ParallaxScroller(graphics["starfield_01c"], 0, 0, 0.3))
+        self.scrollers.append(ParallaxScroller(g_store["starfield_01a"], 0, 0, 0.1))
+        self.scrollers.append(ParallaxScroller(g_store["starfield_01b"], 0, 0, 0.2))
+        self.scrollers.append(ParallaxScroller(g_store["starfield_01c"], 0, 0, 0.3))
         self.next_update_time = 0
         
         # Prepare the player's ship
-        self.ship = Ship(graphics["ship_01"], 400 - 32, SHIP_Y, pygame.Rect(0, SHIP_Y, 800 - 64, 64))
+        self.ship = Ship(400 - 32, SHIP_Y, pygame.Rect(0, SHIP_Y, 800 - 64, 64))
         self.ship.collided = False
 
-        self.explosions = Explosions(graphics["explosion_frames_01"])
+        self.explosions = Explosions()
         
-        self.weapon = WeaponFire(graphics["weapon_01"])
+        self.weapon = WeaponFire()
         self.weapon.firing = False
         
-        self.mines = MineController(graphics["miner_frames_01"], graphics["cloud_frames_01"])
+        self.mines = MineController()
         
         # Prepare the asteroids
-        self.asteroids = Asteroids(graphics["asteroid_01"])
+        self.asteroids = Asteroids()
         
         # Prepare the UI screen
-        self.overlay = graphics["screen_01"]
+        self.overlay = g_store["screen_01"]
         
         # Prepare the status bars
         self.speedbar = Speedbar(Rect(SPEEDBAR_X, SPEEDBAR_Y, 400, 8))
@@ -727,13 +734,10 @@ class Game(object):
         """
         Main routine for drawing the display.
         """
-        # Draw the animations
+        # Draw the background
         for scroller in self.scrollers:
             scroller.render(self.display)
         
-        # Draw the ship
-        self.ship.draw(self.display)
-
         # Draw any active explosions
         self.explosions.draw(self.display)
 
@@ -746,6 +750,9 @@ class Game(object):
         # Draw any active weapon fire
         self.weapon.draw(self.display)
         
+        # Draw the ship
+        self.ship.draw(self.display)
+
         # Update the UI
         self.display.blit(self.overlay, [0, 0])
         
