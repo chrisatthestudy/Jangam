@@ -17,8 +17,8 @@ SCREEN_LEFT = 16
 SCREEN_RIGHT = 784
 
 SHIP_Y = SCREEN_BOTTOM - 64
-SPEEDBAR_X = 400
-SPEEDBAR_Y = 800 - 32
+SPEEDBAR_X = 170
+SPEEDBAR_Y = SCREEN_BOTTOM + 16 + 6
 
 #from time import clock
 
@@ -55,6 +55,56 @@ class GraphicStore(object):
 # This variable is actually initialised in the Game() class, as pygame.display
 # has to be initialised before the class can be created.
 g_store = GraphicStore()
+
+class Label(object):
+    """
+    Simple class to render a label on-screen. Create an instance and call
+    the draw() method.
+    """
+    
+    def __init__(self, text, x, y):
+        self.set_font(os.path.join("graphics", "04B_03.ttf"), 16)
+        self.margin = 0
+        self.text = text
+        self._colour = pygame.color.Color('#cfa100')
+        self.x = x
+        self.y = y
+        
+    def draw(self, surface):
+        """
+        Renders the visual appearance.
+        """
+        width = surface.get_width()
+        height = surface.get_height()
+        
+        if self._text != "":
+            # Render the caption
+            caption_surface = self.font.render(self.text, True, self.colour)
+            surface.blit(caption_surface, (self.x, self.y))
+
+    def get_text(self):
+        return self._text
+        
+    def set_text(self, new_text):
+        self._text = new_text
+
+    def set_font(self, name, size):
+        self.fontname = name
+        self.fontsize = size
+        if self.fontname == "":
+            self.font = pygame.font.Font(None, self.fontsize)
+        else:
+            self.font = pygame.font.Font(self.fontname, self.fontsize)
+
+    def get_colour(self):
+        return self._colour
+        
+    def set_colour(self, new_colour):
+        self._colour = new_colour
+        self.changed = True
+        
+    text = property(get_text, set_text)
+    colour = property(get_colour, set_colour)
 
 class ParallaxScroller(object):
     """
@@ -166,6 +216,7 @@ class FrameSprite(pygame.sprite.Sprite):
     spriteImage = None
     frames = None
     animation = None
+    on_remove = None
     
     def __init__(self, image, speed):
         """
@@ -176,7 +227,7 @@ class FrameSprite(pygame.sprite.Sprite):
         pygame.sprite.Sprite.__init__(self)
 
         # Set up the animation handler
-        self.animation = Animation(image, speed, self.on_finish)
+        self.animation = Animation(image, speed, self.on_cycle)
         self.rect = self.animation.rect
         self.image = self.animation.image
         
@@ -200,19 +251,35 @@ class FrameSprite(pygame.sprite.Sprite):
         if self.visible:
             target.blit(self.image, self.rect)
 
-    def on_finish(self, animation):
+    def on_cycle(self, animation):
         if self.play_once:
             self.visible = False
-        
+
+    def remove(self):
+        """
+        Call this to remove the sprite from the game. It will hide it, and will
+        also call any assigned on_remove function, which is generally used to
+        inform the owning sprite-group (if any) that the sprite should be
+        removed.
+        """
+        self.visible = False
+        if self.on_remove:
+            self.on_remove(self)
+            
 class Asteroid(FrameSprite):
     
     spriteImage = None
     frames = None
     being_mined = False
     radius = 28
+    value = 1
     
-    def __init__(self, on_die):
-        FrameSprite.__init__(self, g_store["asteroid_01"], 10)
+    def __init__(self, on_remove):
+        asteroids = ["asteroid_01", "asteroid_iron_01", "asteroid_gold_01", "asteroid_emerald_01", "asteroid_powerup_mine_01", "asteroid_powerup_shield_01"]
+        if random.randint(0, 100) > 80:
+            self.value = random.randint(0, 5) + 1
+        
+        FrameSprite.__init__(self, g_store[asteroids[self.value - 1]], 10)
         
         self.rect = Rect(0, 0, 64, 64)
         self.rect.top = (0 - self.rect.height) * random.randint(1, 10)
@@ -223,7 +290,7 @@ class Asteroid(FrameSprite):
         
         self.next_update_time = 0 # update() hasn't been called yet.
         
-        self.on_die = on_die
+        self.on_remove = on_remove
         
     def update(self, current_time, bottom):
         FrameSprite.update(self, current_time)
@@ -234,10 +301,9 @@ class Asteroid(FrameSprite):
                 # Asteroids which are being mined do not move
                 pass
             else:
-                # If we're at the bottom of the screen, move us back to the top.
+                # If we're at the bottom of the screen, remove us.
                 if self.rect.bottom >= bottom - 1:
-                    self.rect.top = (0 - self.rect.height) * random.randint(1, 10)
-                    self.rect.left = random.randint(0, 800)
+                    self.remove()
             
                 self.rect.left = self.rect.left + self.drift
                     
@@ -248,12 +314,14 @@ class Asteroid(FrameSprite):
 
 class Asteroids(object):
     
+    max_asteroids = 20
+    
     def __init__(self):
         self.roids = pygame.sprite.Group()
-        for i in range(50):
-            self.roids.add(Asteroid(self.on_roid_die))
 
     def update(self, current_time):
+        if random.randint(0, 100) > 50 and len(self.roids) < self.max_asteroids:
+            self.roids.add(Asteroid(self.on_roid_die))
         self.roids.update(current_time, 864)
     
     def draw(self, target):
@@ -270,7 +338,7 @@ class Pulse(FrameSprite):
     """
     
     def __init__(self, on_die):
-        FrameSprite.__init__(self, g_store["weapon_01"], 10)
+        FrameSprite.__init__(self, g_store["weapon_02"], 10)
 
         # Set the default position, at the front of the ship (the X co-ordinate
         # representing the ship position will be set via the WeaponFire class).
@@ -351,10 +419,17 @@ class Mine(FrameSprite):
     asteroid = None
     radius = 12
     clouds = None
+    ship = None
     
-    def __init__(self, on_die):
+    def __init__(self, ship, on_remove):
         FrameSprite.__init__(self, g_store["miner_frames_01"], 10)
 
+        # Store the reference to the Ship instance.
+        self.ship = ship
+        
+        # The ship now has one less Mine available
+        self.ship.mining_units = self.ship.mining_units - 1
+        
         # Set the default position, at the front of the ship (the X co-ordinate
         # representing the ship position will be set via the MineController
         # class).
@@ -364,7 +439,7 @@ class Mine(FrameSprite):
         
         self.next_update_time = 0 # update() hasn't been called yet.
         
-        self.on_die = on_die
+        self.on_remove = on_remove
         
         self.clouds = FrameSprite(g_store["cloud_frames_01"], 10)
         self.clouds.visible = False
@@ -377,15 +452,19 @@ class Mine(FrameSprite):
             if self.is_mining:
                 self.clouds.update(current_time)
                 self.mine_time = self.mine_time - 1
+                if self.asteroid:
+                    if self.asteroid.value < 5:
+                        self.ship.score = self.ship.score + self.asteroid.value
+                    elif self.asteroid.value == 6:
+                        self.ship.shield = self.ship.shield + 0.1
                 if self.mine_time < 1:
-                    self.on_die(self)
-                    self.asteroid.on_die(self.asteroid)
+                    self.remove()
             else:
                 # Move us up the screen
                 self.rect.top -= self.speed
                 
                 if self.rect.top < -24:
-                    self.on_die(self)
+                    self.remove()
                 
             self.next_update_time = current_time + 1
 
@@ -400,6 +479,14 @@ class Mine(FrameSprite):
         self.clouds.rect.left = self.clouds.rect.left - 4
         self.clouds.rect.top = self.rect.top - 16
         self.clouds.visible = True
+
+    def remove(self):
+        self.ship.mining_units = self.ship.mining_units + 1
+        if self.asteroid:
+            if self.asteroid.value == 5:
+                self.ship.mining_units = self.ship.mining_units + 1
+            self.asteroid.remove()
+        FrameSprite.remove(self)
         
 class MineController(object):
     """
@@ -407,7 +494,12 @@ class MineController(object):
     sprites that represent the visible appearance.
     """
 
-    def __init__(self):
+    ship = None
+    
+    def __init__(self, ship):
+        # Store the reference to the Ship instance
+        self.ship = ship
+        
         # Store the 'mine' sprites in a sprite group for efficiency
         self.mines = pygame.sprite.Group()
         
@@ -417,7 +509,7 @@ class MineController(object):
 
     def launch(self, position):
         # Launch a mine
-        mine = Mine(self.on_mine_die)
+        mine = Mine(self.ship, self.on_mine_remove)
         mine.rect = position
         self.mines.add(mine)
         
@@ -428,7 +520,7 @@ class MineController(object):
         pygame.display.update(rectlist)
         [mine.draw_clouds(target) for mine in self.mines]
 
-    def on_mine_die(self, mine):
+    def on_mine_remove(self, mine):
         # The mine has gone off-screen, so remove it
         self.mines.remove(mine)
 
@@ -438,16 +530,14 @@ class Burst(FrameSprite):
     sprite which doesn't move.
     """
     
-    def __init__(self, on_die = None):
+    def __init__(self, on_remove = None):
         FrameSprite.__init__(self, g_store["explosion_frames_01"], 10)
         self.play_once = True
-        self.on_die = on_die
-        self.animation.on_cycle = self.on_finish
+        self.on_remove = on_remove
+        self.animation.on_cycle = self.on_cycle
 
-    def on_finish(self, animation):
-        self.visible = False
-        if self.on_die:
-            self.on_die(self)
+    def on_cycle(self, animation):
+        self.remove()
 
 class Explosions(object):
     """
@@ -467,7 +557,7 @@ class Explosions(object):
         """
         Adds a new explosion at the specified co-ordinates
         """
-        burst = Burst(self.on_burst_die)
+        burst = Burst(self.on_burst_remove)
         burst.rect.left = position.left
         burst.rect.top = position.top
         self.bursts.add(burst)
@@ -482,7 +572,7 @@ class Explosions(object):
         rectlist = self.bursts.draw(target)
         pygame.display.update(rectlist)
 
-    def on_burst_die(self, burst):
+    def on_burst_remove(self, burst):
         # The burst has finished, so remove it
         self.bursts.remove(burst)
         
@@ -494,15 +584,21 @@ class Ship(FrameSprite):
     max_speed = 2
     acceleration = 0.05
     braking = 0.05
+    shield = 0
+    hull = 100
+    score = 0
+    mining_units = 1
     
     def __init__(self, x, y, container_rect):
         FrameSprite.__init__(self, g_store["ship_01"], 10)
-        self.x = x
-        self.y = y
+        # Set the initial position of the ship
         self.rect = self.image.get_rect()
-        self.rect.topleft = (self.x, self.y)
+        self.rect.topleft = (x, y)
         self.rect.width = 64
+        # The container_rect is the area of the screen that the ship is confined
+        # to
         self.container_rect = container_rect.copy()
+        # Set the ship's initial parameters
         self.thrust_left = 0
         self.thrust_right = 0
         self.speed = 0.0
@@ -549,21 +645,21 @@ class Ship(FrameSprite):
         self.thrust_left = 0
         self.thrust_right = 0
     
-class Speedbar():
+class Progressbar():
     """
-    Draws a speedbar on-screen
+    Draws a Progress Bar on-screen
     """
     
     def __init__(self, rect, color = pygame.color.Color('#ff0000')):
         self.rect = rect
-        self.speed = 0
+        self.value = 0
         self.color = color
         
-    def update(self, speed):
-        self.speed = speed * 10
+    def update(self, value):
+        self.value = value
     
     def draw(self, target):
-        self.rect.width = abs(int(self.speed))
+        self.rect.width = abs(int(self.value))
         target.fill(self.color, self.rect)
     
 class Game(object):
@@ -588,6 +684,16 @@ class Game(object):
         pygame.display.set_caption("Jangam")
         
         g_store.load("graphics")
+
+    # --------------------------------------------------------------------------
+    
+    def startup(self):
+        """
+        Creates and initialises the various game components.
+        """
+        self.running = True
+        
+        self.game_over = False
         
         # Prepare the animations
         self.scrollers = []
@@ -605,7 +711,7 @@ class Game(object):
         self.weapon = WeaponFire()
         self.weapon.firing = False
         
-        self.mines = MineController()
+        self.mines = MineController(self.ship)
         
         # Prepare the asteroids
         self.asteroids = Asteroids()
@@ -614,43 +720,43 @@ class Game(object):
         self.overlay = g_store["screen_01"]
         
         # Prepare the status bars
-        self.speedbar = Speedbar(Rect(SPEEDBAR_X, SPEEDBAR_Y, 400, 8))
+        self.score_label  = Label("Score           : ", SPEEDBAR_X, SPEEDBAR_Y)
+        self.mine_label   = Label("Mining Units    : ", SPEEDBAR_X, SPEEDBAR_Y + 16)
+        self.hull_label   = Label("Hull Integrity  : ", SPEEDBAR_X, SPEEDBAR_Y + 32)
+        self.shield_label = Label("Shield Strength : ", SPEEDBAR_X, SPEEDBAR_Y + 48)
         
-    # --------------------------------------------------------------------------
-    
-    def startup(self):
-        """
-        Creates and initialises the various game components.
-        """
-        self.running = True
+        self.end = g_store["game_over_01"]
         
     # --------------------------------------------------------------------------
 
     def on_keydown(self, key):
-        if key == K_LEFT:
-            self.ship.apply_thrust_left()
-            
-        if key == K_RIGHT:
-            self.ship.apply_thrust_right()
+        if not self.game_over:
+            if key == K_LEFT:
+                self.ship.apply_thrust_left()
                 
-        if key == K_z:
-            self.weapon.firing = True
+            if key == K_RIGHT:
+                self.ship.apply_thrust_right()
+                    
+            if key == K_z:
+                self.weapon.firing = True
 
-        if key == K_x:
-            position = Rect(self.ship.rect)
-            self.mines.launch(position)
+            if key == K_x:
+                if self.ship.mining_units > 0:
+                    position = Rect(self.ship.rect)
+                    self.mines.launch(position)
             
     # --------------------------------------------------------------------------
 
     def on_keyup(self, key):
-        if key == K_RIGHT:
-            self.ship.release_thrust_right()
-            
-        if key == K_LEFT:
-            self.ship.release_thrust_left()
-            
-        if key == K_z:
-            self.weapon.firing = False        
+        if not self.game_over:
+            if key == K_RIGHT:
+                self.ship.release_thrust_right()
+                
+            if key == K_LEFT:
+                self.ship.release_thrust_left()
+                
+            if key == K_z:
+                self.weapon.firing = False        
         
     # --------------------------------------------------------------------------
 
@@ -669,8 +775,11 @@ class Game(object):
         # Update the ship position
         self.ship.update(current_time)
         
-        self.speedbar.update(self.ship.speed)
-        
+        self.score_label.text  = "%d" % self.ship.score
+        self.mine_label.text   = "%d" % self.ship.mining_units
+        self.hull_label.text   = "%d %%" % self.ship.hull
+        self.shield_label.text = "%d" % self.ship.shield
+    
         # Update the asteroid positions
         self.asteroids.update(current_time)
         
@@ -680,27 +789,43 @@ class Game(object):
         self.weapon.update(current_time)
         
         self.mines.update(current_time)
-        
-        # Check for collisions with asteroids
-        collision = pygame.sprite.spritecollide(self.ship, self.asteroids.roids, True)
-        if collision:
-            # Show explosion
-            self.ship.collided = True
-            self.explosions.add(collision[0].rect)
 
-        # Check for hitting asteroids with weapon-fire
+        if not self.game_over:
+            # Check for collisions with asteroids
+            collision = pygame.sprite.spritecollide(self.ship, self.asteroids.roids, True)
+            if collision:
+                # Show explosion
+                self.ship.collided = True
+                if self.ship.shield > 0:
+                    self.ship.shield = self.ship.shield - 25
+                else:
+                    self.ship.hull = self.ship.hull - 25
+                self.explosions.add(collision[0].rect)
+                if self.ship.hull <= 0:
+                    self.game_over = True
+
+        # Check for hitting asteroids or mines with weapon-fire
         for pulse in self.weapon.pulses:
             collision = pygame.sprite.spritecollide(pulse, self.asteroids.roids, True)
             if collision:
                 for sprite in collision:
                     # Show explosion
                     self.explosions.add(sprite.rect)
+            collision = pygame.sprite.spritecollide(pulse, self.mines.mines, False)
+            if collision:
+                for sprite in collision:
+                    # Show explosion
+                    self.explosions.add(sprite.rect)
+                    sprite.remove()
 
         # Check for hitting asteroids with a miner
         for mine in self.mines.mines:
-            if not mine.is_mining:
-                collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False, pygame.sprite.collide_circle)
-                if collision:
+            collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False, pygame.sprite.collide_circle)
+            if collision:
+                if mine.is_mining:
+                    self.explosions.add(mine.rect)
+                    mine.remove()
+                else:
                     roid = collision[0]
                     roid.being_mined = True
                     mine.rect.left = roid.rect.left + 20
@@ -750,14 +875,20 @@ class Game(object):
         # Draw any active weapon fire
         self.weapon.draw(self.display)
         
-        # Draw the ship
-        self.ship.draw(self.display)
+        if self.game_over:
+            self.display.blit(self.end, [200, 300])            
+        else:
+            # Draw the ship
+            self.ship.draw(self.display)
 
         # Update the UI
         self.display.blit(self.overlay, [0, 0])
         
         # Update the status bars
-        self.speedbar.draw(self.display)
+        self.score_label.draw(self.display)
+        self.mine_label.draw(self.display)
+        self.hull_label.draw(self.display)
+        self.shield_label.draw(self.display)
         
         # Update the display
         pygame.display.update()
