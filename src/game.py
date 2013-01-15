@@ -42,6 +42,26 @@ class GraphicStore(object):
     def __getitem__(self, key):
         return self.items[key]
 
+class SoundStore(object):
+    """
+    Loads and stores all the sounds used in the game. The sounds are stored in
+    a dictionary keyed on the name (without extension) of the graphic.
+    """
+    
+    def load(self, path):
+        """
+        Loads all the sounds from the specified path.
+        """
+        self.items = {}
+        files = glob.glob(os.path.join(path, "*.ogg"))
+        for soundfile in files:
+            sound = pygame.mixer.Sound(soundfile)
+            key, ext = os.path.splitext(os.path.basename(soundfile))
+            self.items[key] = sound
+            
+    def __getitem__(self, key):
+        return self.items[key]
+
 # ==============================================================================
 # g_store: GLOBAL VARIABLE!!!!
 # ==============================================================================
@@ -56,6 +76,13 @@ class GraphicStore(object):
 # has to be initialised before the class can be created.
 g_store = GraphicStore()
 
+# ==============================================================================
+# s_store: GLOBAL VARIABLE!!!!
+# ==============================================================================
+# This is similar to the GraphicStore() class above, and allows all the other
+# classes to have access to the sound files.
+s_store = SoundStore()
+
 class Label(object):
     """
     Simple class to render a label on-screen. Create an instance and call
@@ -66,7 +93,7 @@ class Label(object):
         self.set_font(os.path.join("graphics", "04B_03.ttf"), 16)
         self.margin = 0
         self.text = text
-        self._colour = pygame.color.Color('#cfa100')
+        self.colour = pygame.color.Color('#cfa100')
         self.x = x
         self.y = y
         
@@ -77,16 +104,10 @@ class Label(object):
         width = surface.get_width()
         height = surface.get_height()
         
-        if self._text != "":
+        if self.text != "":
             # Render the caption
             caption_surface = self.font.render(self.text, True, self.colour)
             surface.blit(caption_surface, (self.x, self.y))
-
-    def get_text(self):
-        return self._text
-        
-    def set_text(self, new_text):
-        self._text = new_text
 
     def set_font(self, name, size):
         self.fontname = name
@@ -95,16 +116,6 @@ class Label(object):
             self.font = pygame.font.Font(None, self.fontsize)
         else:
             self.font = pygame.font.Font(self.fontname, self.fontsize)
-
-    def get_colour(self):
-        return self._colour
-        
-    def set_colour(self, new_colour):
-        self._colour = new_colour
-        self.changed = True
-        
-    text = property(get_text, set_text)
-    colour = property(get_colour, set_colour)
 
 class ParallaxScroller(object):
     """
@@ -275,9 +286,9 @@ class Asteroid(FrameSprite):
     value = 1
     
     def __init__(self, on_remove):
-        asteroids = ["asteroid_01", "asteroid_iron_01", "asteroid_gold_01", "asteroid_emerald_01", "asteroid_powerup_mine_01", "asteroid_powerup_shield_01"]
+        asteroids = ["asteroid_01", "asteroid_iron_01", "asteroid_gold_01", "asteroid_emerald_01", "asteroid_powerup_mine_01", "asteroid_powerup_shield_01", "asteroid_powerup_hull_01"]
         if random.randint(0, 100) > 80:
-            self.value = random.randint(0, 5) + 1
+            self.value = random.randint(0, 6) + 1
         
         FrameSprite.__init__(self, g_store[asteroids[self.value - 1]], 10)
         
@@ -456,7 +467,7 @@ class Mine(FrameSprite):
                     if self.asteroid.value < 5:
                         self.ship.score = self.ship.score + self.asteroid.value
                     elif self.asteroid.value == 6:
-                        self.ship.shield = self.ship.shield + 0.1
+                        self.ship.shield = self.ship.shield + 0.025
                 if self.mine_time < 1:
                     self.remove()
             else:
@@ -485,6 +496,12 @@ class Mine(FrameSprite):
         if self.asteroid:
             if self.asteroid.value == 5:
                 self.ship.mining_units = self.ship.mining_units + 1
+                s_store["new_mining_unit"].play()
+            elif self.asteroid.value == 6:
+                s_store["shield_enhanced"].play()
+            elif self.asteroid.value == 7:
+                s_store["hull_integrity_restored"].play()
+                self.ship.hull = 100
             self.asteroid.remove()
         FrameSprite.remove(self)
         
@@ -684,6 +701,7 @@ class Game(object):
         pygame.display.set_caption("Jangam")
         
         g_store.load("graphics")
+        s_store.load("sounds")
 
     # --------------------------------------------------------------------------
     
@@ -726,6 +744,8 @@ class Game(object):
         self.shield_label = Label("Shield Strength : ", SPEEDBAR_X, SPEEDBAR_Y + 48)
         
         self.end = g_store["game_over_01"]
+        
+        pygame.mixer.init(frequency=16000, size=-16, channels=1, buffer=4096)
         
     # --------------------------------------------------------------------------
 
@@ -796,13 +816,23 @@ class Game(object):
             if collision:
                 # Show explosion
                 self.ship.collided = True
+                self.explosions.add(collision[0].rect)
+                # If the ship has shields, reduce them...
                 if self.ship.shield > 0:
                     self.ship.shield = self.ship.shield - 25
                 else:
+                    # ...otherwise apply the damage directly to the hull
                     self.ship.hull = self.ship.hull - 25
-                self.explosions.add(collision[0].rect)
-                if self.ship.hull <= 0:
-                    self.game_over = True
+                    # Announce the new hull status
+                    if self.ship.hull == 75:
+                        s_store["hull_integrity_75"].play()
+                    elif self.ship.hull == 50:
+                        s_store["hull_integrity_50"].play()
+                    elif self.ship.hull == 25:
+                        s_store["hull_integrity_25"].play()
+                    elif self.ship.hull <= 0:
+                        self.game_over = True
+                        s_store["game_over"].play()
 
         # Check for hitting asteroids or mines with weapon-fire
         for pulse in self.weapon.pulses:
