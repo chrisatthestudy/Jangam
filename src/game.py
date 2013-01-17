@@ -468,8 +468,8 @@ class Mine(FrameSprite):
                     if self.asteroid.value < 5:
                         self.ship.score = self.ship.score + self.asteroid.value
                     # Otherwise, if it is a shield power-up, increase the
-                    # shield-strength
-                    elif self.asteroid.value == 6:
+                    # shield-strength (up to a limit of 100)
+                    elif self.asteroid.value == 6 and self.ship.shield < 100:
                         self.ship.shield = self.ship.shield + 0.025
                 if self.mine_time < 1:
                     # The mining-time has finished. Remove the mining unit
@@ -504,6 +504,7 @@ class Mine(FrameSprite):
         if self.asteroid:
             if self.asteroid.value == 5:
                 self.ship.mining_units = self.ship.mining_units + 1
+                self.ship.total_mining_units = self.ship.total_mining_units + 1
                 s_store["new_mining_unit"].play()
             elif self.asteroid.value == 6:
                 s_store["shield_enhanced"].play()
@@ -612,7 +613,8 @@ class Ship(FrameSprite):
     shield = 0
     hull = 100
     score = 0
-    mining_units = 1
+    mining_units = 1       # Mining units available for launch
+    total_mining_units = 1 # Total mining units, including currently-deployed ones
     
     def __init__(self, x, y, container_rect):
         FrameSprite.__init__(self, g_store["ship_01"], 10)
@@ -753,14 +755,21 @@ class Game(object):
         self.overlay = g_store["screen_01"]
         
         # Prepare the status bars
-        self.score_label  = Label("Score           : ", SPEEDBAR_X, SPEEDBAR_Y)
-        self.mine_label   = Label("Mining Units    : ", SPEEDBAR_X, SPEEDBAR_Y + 16)
-        self.hull_label   = Label("Hull Integrity  : ", SPEEDBAR_X, SPEEDBAR_Y + 32)
-        self.shield_label = Label("Shield Strength : ", SPEEDBAR_X, SPEEDBAR_Y + 48)
+        self.score_label  = Label("%d" % self.ship.score, SPEEDBAR_X, SPEEDBAR_Y)
+        self.mine_label   = Label("%d" % self.ship.mining_units, SPEEDBAR_X, SPEEDBAR_Y + 16)
+        self.hull_label   = Label("%d %%" % self.ship.hull, SPEEDBAR_X, SPEEDBAR_Y + 32)
+        self.shield_label = Label("%d" % self.ship.shield, SPEEDBAR_X, SPEEDBAR_Y + 48)
+        
+        self.large_score_label = Label("Score: %d" % self.ship.score, 300, 32)
+        self.large_score_label.set_font(os.path.join("graphics", "04B_03.ttf"), 48)
+    
+        self.logo = g_store["logo"]
         
         self.end = g_store["game_over_01"]
         
         pygame.mixer.init(frequency=16000, size=-16, channels=1, buffer=4096)
+        
+        self.mode = self.MODE_INTRO
         
     # --------------------------------------------------------------------------
 
@@ -772,10 +781,10 @@ class Game(object):
             if key == K_RIGHT:
                 self.ship.apply_thrust_right()
                     
-            if key == K_z:
-                self.weapon.firing = True
+            # if key == K_z:
+            #    self.weapon.firing = True
 
-            if key == K_x:
+            if key == K_UP:
                 if self.ship.mining_units > 0:
                     position = Rect(self.ship.rect)
                     self.mines.launch(position)
@@ -801,12 +810,30 @@ class Game(object):
         """
         current_time = pygame.time.get_ticks()
 
-        # Update the scrolling background animations
+        # Always update the scrolling background animations
         if self.next_update_time < current_time:
             for scroller in self.scrollers:
                 scroller.update()
             self.next_update_time = current_time + 10
 
+        # Call the mode-specific update routine
+        if self.mode == self.MODE_INTRO:
+            self.update_intro(current_time)
+        elif self.mode == self.MODE_GAME:
+            self.update_game(current_time)
+
+    # --------------------------------------------------------------------------
+
+    def update_intro(self, current_time):
+        for event in pygame.event.get():
+            if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
+                self.running = False
+            elif (event.type == KEYDOWN) and (event.key == K_SPACE):
+                self.mode = self.MODE_GAME
+            
+    # --------------------------------------------------------------------------
+
+    def update_game(self, current_time):
         # Update the ship position
         self.ship.update(current_time)
         
@@ -814,6 +841,8 @@ class Game(object):
         self.mine_label.text   = "%d" % self.ship.mining_units
         self.hull_label.text   = "%d %%" % self.ship.hull
         self.shield_label.text = "%d" % self.ship.shield
+        
+        self.large_score_label.text = "Score: %d" % self.ship.score
 
         # Possibly add a new asteroid
         if random.randint(0, 100) > 50 and len(self.asteroids.roids) < self.asteroids.max_asteroids:
@@ -827,13 +856,20 @@ class Game(object):
             # appropriate.
             if random.randint(1, 100) > 80:
                 powerups = []
-                if len(self.mines.mines) <= 8:
+                # Only allow 5 mining units 
+                if self.ship.total_mining_units < 5:
                     powerups.append(5)
+                # Maximum shield strength is 100
                 if self.ship.shield < 100:
                     powerups.append(6)
+                # If the hull is damaged, include hull-repair powerups
                 if self.ship.hull < 100:
                     powerups.append(7)
-                value = random.choice(powerups)
+                if len(powerups):
+                    value = random.choice(powerups)
+                else:
+                    # No power-ups available. Revert to a standard asteroid
+                    value = 1
             self.asteroids.roids.add(Asteroid(value, self.asteroids.on_roid_die))
         
         # Update the asteroid positions
@@ -918,7 +954,7 @@ class Game(object):
             elif event.type == MOUSEMOTION:
                 # self.mouse_moved(pygame.mouse.get_pos())
                 pass
-
+            
     # --------------------------------------------------------------------------
     
     def draw(self):
@@ -928,25 +964,30 @@ class Game(object):
         # Draw the background
         for scroller in self.scrollers:
             scroller.render(self.display)
-        
-        # Draw any active explosions
-        self.explosions.draw(self.display)
 
-        # Draw the asteroids
-        self.asteroids.draw(self.display)
-        
-        # Draw any active mines
-        self.mines.draw(self.display)
-
-        # Draw any active weapon fire
-        self.weapon.draw(self.display)
-        
-        if self.game_over:
-            self.display.blit(self.end, [200, 300])            
-        else:
-            # Draw the ship
-            self.ship.draw(self.display)
-
+        if self.mode == self.MODE_INTRO:
+            # Draw the logo
+            self.display.blit(self.logo, [200, 100])
+        elif self.mode == self.MODE_GAME:
+            
+            # Draw any active explosions
+            self.explosions.draw(self.display)
+    
+            # Draw the asteroids
+            self.asteroids.draw(self.display)
+            
+            # Draw any active mines
+            self.mines.draw(self.display)
+    
+            # Draw any active weapon fire
+            self.weapon.draw(self.display)
+            
+            if self.game_over:
+                self.display.blit(self.end, [200, 300])            
+            else:
+                # Draw the ship
+                self.ship.draw(self.display)
+            
         # Update the UI
         self.display.blit(self.overlay, [0, 0])
         
@@ -955,6 +996,8 @@ class Game(object):
         self.mine_label.draw(self.display)
         self.hull_label.draw(self.display)
         self.shield_label.draw(self.display)
+        
+        self.large_score_label.draw(self.display)
         
         # Update the display
         pygame.display.update()
