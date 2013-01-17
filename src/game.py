@@ -285,10 +285,9 @@ class Asteroid(FrameSprite):
     radius = 28
     value = 1
     
-    def __init__(self, on_remove):
+    def __init__(self, value, on_remove):
         asteroids = ["asteroid_01", "asteroid_iron_01", "asteroid_gold_01", "asteroid_emerald_01", "asteroid_powerup_mine_01", "asteroid_powerup_shield_01", "asteroid_powerup_hull_01"]
-        if random.randint(0, 100) > 80:
-            self.value = random.randint(0, 6) + 1
+        self.value = value
         
         FrameSprite.__init__(self, g_store[asteroids[self.value - 1]], 10)
         
@@ -331,8 +330,6 @@ class Asteroids(object):
         self.roids = pygame.sprite.Group()
 
     def update(self, current_time):
-        if random.randint(0, 100) > 50 and len(self.roids) < self.max_asteroids:
-            self.roids.add(Asteroid(self.on_roid_die))
         self.roids.update(current_time, 864)
     
     def draw(self, target):
@@ -461,19 +458,29 @@ class Mine(FrameSprite):
         if self.next_update_time < current_time:
 
             if self.is_mining:
+                # Update the animated 'mining dust'
                 self.clouds.update(current_time)
+                # Count down the time we've spent mining
                 self.mine_time = self.mine_time - 1
                 if self.asteroid:
+                    # If it is a normal asteroid, update the player's score
+                    # with the value
                     if self.asteroid.value < 5:
                         self.ship.score = self.ship.score + self.asteroid.value
+                    # Otherwise, if it is a shield power-up, increase the
+                    # shield-strength
                     elif self.asteroid.value == 6:
                         self.ship.shield = self.ship.shield + 0.025
                 if self.mine_time < 1:
+                    # The mining-time has finished. Remove the mining unit
+                    # and the asteroid
                     self.remove()
             else:
                 # Move us up the screen
                 self.rect.top -= self.speed
-                
+
+                # If we reach the top of the screen without encountering any
+                # asteroids, remove the unit
                 if self.rect.top < -24:
                     self.remove()
                 
@@ -485,6 +492,7 @@ class Mine(FrameSprite):
 
     def start_mining(self):
         self.is_mining = True
+        # Position the 'mining dust' animation at the top of the mining unit
         self.clouds.rect = Rect(self.rect)
         self.clouds.rect.width = 32
         self.clouds.rect.left = self.clouds.rect.left - 4
@@ -690,10 +698,17 @@ class Game(object):
             newgame = Game()
             newgame.run()
     """
+
+    # Game mode pseudo-constants
+    MODE_INTRO = 1  # Opening screen. Pressing SPACE starts the game
+    MODE_GAME  = 2  # Main game
+    MODE_OUTRO = 3  # 'Game Over' screen
+    MODE_SCORE = 4  # Player is editing hi-score table
     
     def __init__(self):
         logging.basicConfig(filename='jangam.log', format='%(asctime)s %(message)s', level=logging.INFO)
         
+        os.environ['SDL_VIDEO_CENTERED'] = '1'
         pygame.init()
         
         # Prepare the main display
@@ -799,7 +814,28 @@ class Game(object):
         self.mine_label.text   = "%d" % self.ship.mining_units
         self.hull_label.text   = "%d %%" % self.ship.hull
         self.shield_label.text = "%d" % self.ship.shield
-    
+
+        # Possibly add a new asteroid
+        if random.randint(0, 100) > 50 and len(self.asteroids.roids) < self.asteroids.max_asteroids:
+            # Most asteroids have the default value of 1, but there is a 20% chance
+            # that it will be a more valuable one.
+            if random.randint(1, 100) > 80:
+                value = random.randint(2, 4)
+            else:
+                value = 1
+            # There is also a 20% possibility that it will be a power-up, if 
+            # appropriate.
+            if random.randint(1, 100) > 80:
+                powerups = []
+                if len(self.mines.mines) <= 8:
+                    powerups.append(5)
+                if self.ship.shield < 100:
+                    powerups.append(6)
+                if self.ship.hull < 100:
+                    powerups.append(7)
+                value = random.choice(powerups)
+            self.asteroids.roids.add(Asteroid(value, self.asteroids.on_roid_die))
+        
         # Update the asteroid positions
         self.asteroids.update(current_time)
         
@@ -914,7 +950,7 @@ class Game(object):
         # Update the UI
         self.display.blit(self.overlay, [0, 0])
         
-        # Update the status bars
+        # Update the status
         self.score_label.draw(self.display)
         self.mine_label.draw(self.display)
         self.hull_label.draw(self.display)
