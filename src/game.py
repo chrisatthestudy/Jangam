@@ -467,10 +467,6 @@ class Mine(FrameSprite):
                     # with the value
                     if self.asteroid.value < 5:
                         self.ship.score = self.ship.score + self.asteroid.value
-                    # Otherwise, if it is a shield power-up, increase the
-                    # shield-strength (up to a limit of 100)
-                    elif self.asteroid.value == 6 and self.ship.shield < 100:
-                        self.ship.shield = self.ship.shield + 0.025
                 if self.mine_time < 1:
                     # The mining-time has finished. Remove the mining unit
                     # and the asteroid
@@ -499,18 +495,11 @@ class Mine(FrameSprite):
         self.clouds.rect.top = self.rect.top - 16
         self.clouds.visible = True
 
-    def remove(self):
+    def remove(self, destroyed = False):
         self.ship.mining_units = self.ship.mining_units + 1
         if self.asteroid:
-            if self.asteroid.value == 5:
-                self.ship.mining_units = self.ship.mining_units + 1
-                self.ship.total_mining_units = self.ship.total_mining_units + 1
-                s_store["new_mining_unit"].play()
-            elif self.asteroid.value == 6:
-                s_store["shield_enhanced"].play()
-            elif self.asteroid.value == 7:
-                s_store["hull_integrity_restored"].play()
-                self.ship.hull = 100
+            if not destroyed:
+                self.ship.apply_powerup(self.asteroid.value)
             self.asteroid.remove()
         FrameSprite.remove(self)
         
@@ -667,6 +656,19 @@ class Ship(FrameSprite):
         
     def release_thrust_right(self):
         self.thrust_right = 0
+
+    def apply_powerup(self, value):
+        if not self.game_over:
+            if value == 5:
+                self.mining_units = self.mining_units + 1
+                self.total_mining_units = self.total_mining_units + 1
+                s_store["new_mining_unit"].play()
+            elif value == 6:
+                self.shield = min(self.shield + 25, 100)
+                s_store["shield_enhanced"].play()
+            elif value == 7:
+                self.hull = min(self.hull + 25, 100)
+                s_store["hull_integrity_restored"].play()
         
     def stop(self):
         self.thrust_left = 0
@@ -740,6 +742,7 @@ class Game(object):
         # Prepare the player's ship
         self.ship = Ship(400 - 32, SHIP_Y, pygame.Rect(0, SHIP_Y, 800 - 64, 64))
         self.ship.collided = False
+        self.ship.game_over = False
 
         self.explosions = Explosions()
         
@@ -852,9 +855,9 @@ class Game(object):
                 value = random.randint(2, 4)
             else:
                 value = 1
-            # There is also a 20% possibility that it will be a power-up, if 
+            # There is also a 10% possibility that it will be a power-up, if 
             # appropriate.
-            if random.randint(1, 100) > 80:
+            if random.randint(1, 100) > 90:
                 powerups = []
                 # Only allow 5 mining units 
                 if self.ship.total_mining_units < 5:
@@ -877,8 +880,10 @@ class Game(object):
         
         # Update any weapon fire. Set the position so that the weapon-fire
         # appears from the middle of the ship
+        """
         self.weapon.position = self.ship.rect.left + 32 - 4
         self.weapon.update(current_time)
+        """
         
         self.mines.update(current_time)
 
@@ -891,7 +896,7 @@ class Game(object):
                 self.explosions.add(collision[0].rect)
                 # If the ship has shields, reduce them...
                 if self.ship.shield > 0:
-                    self.ship.shield = self.ship.shield - 25
+                    self.ship.shield = max(self.ship.shield - 25, 0)
                 else:
                     # ...otherwise apply the damage directly to the hull
                     self.ship.hull = self.ship.hull - 25
@@ -903,10 +908,13 @@ class Game(object):
                     elif self.ship.hull == 25:
                         s_store["hull_integrity_25"].play()
                     elif self.ship.hull <= 0:
+                        self.ship.hull = 0
                         self.game_over = True
+                        self.ship.game_over = True
                         s_store["game_over"].play()
 
         # Check for hitting asteroids or mines with weapon-fire
+        """
         for pulse in self.weapon.pulses:
             collision = pygame.sprite.spritecollide(pulse, self.asteroids.roids, True)
             if collision:
@@ -919,16 +927,16 @@ class Game(object):
                     # Show explosion
                     self.explosions.add(sprite.rect)
                     sprite.remove()
-
+        """
+        
         # Check for hitting asteroids with a miner
         for mine in self.mines.mines:
-            collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False, pygame.sprite.collide_circle)
-            if collision:
-                if mine.is_mining:
+            collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False)
+            for roid in collision:
+                if mine.is_mining and not roid.being_mined:
                     self.explosions.add(mine.rect)
-                    mine.remove()
+                    mine.remove(True)
                 else:
-                    roid = collision[0]
                     roid.being_mined = True
                     mine.rect.left = roid.rect.left + 20
                     mine.rect.top  = roid.rect.top + roid.rect.height - 8
