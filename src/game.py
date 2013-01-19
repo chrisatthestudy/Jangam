@@ -3,6 +3,7 @@
 
 import os
 import os.path
+import re
 import glob
 import logging
 import random
@@ -158,12 +159,16 @@ class Animation(object):
     
     def __init__(self, image, speed, on_cycle = None):
         """
-        Initialises the sprite, loading the base image and extracting the
-        frames.
+        Initialises the animation, loading the base image and extracting the
+        frames. The images are expected to be in 'film-strip' style, and the
+        width of each frame should be the same as the height of the image:
+        
+            +----+----+----+----+--
+            | 01 | 02 | 03 | 04 | ... etc.
+            +----+----+----+----+--
     
         Params:
             image : sprite image
-            frame_width : width of each individual frame
             speed : frames per second (max. of 1000)
             on_cycle: optional callback to be invoked at the end of a cycle
         """
@@ -172,14 +177,11 @@ class Animation(object):
         # All the sprite frames in this game are square and laid out
         # horizontally in the image, so the size of each frame can be read
         # from the height of the image.
-        self.frame_width = image.get_height()
+        self.frame_height = self.sprite_image.get_height()
+        self.frame_width = self.frame_height
         
         # Calculate the number of frames.
         self.frame_count = self.sprite_image.get_width() / self.frame_width
-        
-        # Set up the image size details. Assume that we are using the full
-        # height of the image.
-        self.frame_height = self.sprite_image.get_height()
         
         # Extract the frames into a list of sub-surfaces, as this is more
         # efficient than creating an image for each frame.
@@ -219,10 +221,8 @@ class Animation(object):
     
 class FrameSprite(pygame.sprite.Sprite):
     """
-    Implements an animated sprite which has multiple frames. It is expected to
-    be given an image which has all the frames laid out horizontally in 
-    'filmstrip' style, from which it extracts the frames and then cycles through 
-    them.
+    Implements an animated sprite which has multiple frames, using the 
+    Animation() class.
     """
     spriteImage = None
     frames = None
@@ -248,21 +248,27 @@ class FrameSprite(pygame.sprite.Sprite):
         
     def update(self, current_time):
         """
-        This is called every game-tick to allow the sprite to be updated
+        This is called every game-tick to allow the sprite to be updated.
         """
         if self.visible:
+            # Advance the animation and retrieve the current frame image from 
+            # it.
             self.animation.update(current_time)
             self.image = self.animation.image
 
     def draw(self, target):
         """
-        Draws the sprite on the target surface. Does nothing if the sprite is
-        currently not visible.
+        Draws the sprite on the target surface, which will usually be the main
+        display surface. Does nothing if the sprite is currently not visible.
         """
         if self.visible:
             target.blit(self.image, self.rect)
 
     def on_cycle(self, animation):
+        """
+        Callback method, called when the animation reaches the last frame,
+        before it loops back to the first frame again.
+        """
         if self.play_once:
             self.visible = False
 
@@ -278,7 +284,9 @@ class FrameSprite(pygame.sprite.Sprite):
             self.on_remove(self)
             
 class Asteroid(FrameSprite):
-    
+    """
+    Handles a single asteroid or powerup.
+    """
     spriteImage = None
     frames = None
     being_mined = False
@@ -290,8 +298,11 @@ class Asteroid(FrameSprite):
         self.value = value
         
         FrameSprite.__init__(self, g_store[asteroids[self.value - 1]], 10)
-        
+
+        # The size is currently hard-coded.
         self.rect = Rect(0, 0, 64, 64)
+        
+        # Position the asteroid somewhere randomly above the top of the screen
         self.rect.top = (0 - self.rect.height) * random.randint(1, 10)
         self.rect.left = random.randint(0, 800)
         
@@ -329,6 +340,9 @@ class Asteroids(object):
     def __init__(self):
         self.roids = pygame.sprite.Group()
 
+    def clear(self):
+        self.roids.empty()
+        
     def update(self, current_time):
         self.roids.update(current_time, 864)
     
@@ -517,6 +531,9 @@ class MineController(object):
         
         # Store the 'mine' sprites in a sprite group for efficiency
         self.mines = pygame.sprite.Group()
+
+    def clear(self):
+        self.mines.empty()
         
     def update(self, current_time):
         # Update any existing mines            
@@ -576,6 +593,9 @@ class Explosions(object):
         burst.rect.left = position.left
         burst.rect.top = position.top
         self.bursts.add(burst)
+
+    def clear(self):
+        self.bursts.empty()
         
     def update(self, current_time):
         # Update any existing pulses            
@@ -658,17 +678,16 @@ class Ship(FrameSprite):
         self.thrust_right = 0
 
     def apply_powerup(self, value):
-        if not self.game_over:
-            if value == 5:
-                self.mining_units = self.mining_units + 1
-                self.total_mining_units = self.total_mining_units + 1
-                s_store["new_mining_unit"].play()
-            elif value == 6:
-                self.shield = min(self.shield + 25, 100)
-                s_store["shield_enhanced"].play()
-            elif value == 7:
-                self.hull = min(self.hull + 25, 100)
-                s_store["hull_integrity_restored"].play()
+        if value == 5:
+            self.mining_units = self.mining_units + 1
+            self.total_mining_units = self.total_mining_units + 1
+            s_store["new_mining_unit"].play()
+        elif value == 6:
+            self.shield = min(self.shield + 25, 100)
+            s_store["shield_enhanced"].play()
+        elif value == 7:
+            self.hull = min(self.hull + 25, 100)
+            s_store["hull_integrity_restored"].play()
         
     def stop(self):
         self.thrust_left = 0
@@ -691,6 +710,71 @@ class Progressbar():
         self.rect.width = abs(int(self.value))
         target.fill(self.color, self.rect)
     
+class Hiscore(object):
+    """
+    Class for reading and maintaining the hi-score table.
+    """
+    
+    def __init__(self):
+        """
+        Initialises the class
+        """
+        self.read()
+    
+    def read(self):
+        """
+        Reads the hi-score table
+        """
+        # The scores are stored as a list of two-item lists.
+        self.scores = []
+        if os.path.exists("hiscores.txt"):
+            f = open("hiscores.txt", "r")
+            data = f.readlines()
+            f.close()
+            for line in data:
+                # Remove newlines
+                line = re.sub("\n", "", line)
+                parts = line.split("=")
+                if len(parts) == 2:
+                    self.add(parts[1], int(parts[0]))
+    
+    def write(self):
+        """
+        Writes the hi-score table
+        """
+        fo = open("hiscores.txt", 'w')
+    
+        for entry in self.scores:
+            line = "%d=%s\n" % (entry[0], entry[1]) 
+            fo.write(line)
+    
+        fo.close()
+    
+    def position(self, value):
+        """
+        Returns the position that specified value would appear at in the
+        hi-score table. Returns -1 if the value is not high enough to be in
+        the table at all.         
+        """
+        if len(self.scores) == 0:
+            return 0
+        else:
+            result = len(self.scores)
+            for i in range(0, len(self.scores)):
+                if self.scores[i][0] <= value:
+                    result = i
+                    break
+            if result > 9:
+                result = -1
+            return result
+    
+    def add(self, player, score):
+        pos = self.position(score)
+        if pos > -1:
+            self.scores[pos:pos] = [[score, player]]
+            if len(self.scores) > 10:
+                self.scores.pop()
+
 class Game(object):
     """
     Main game class
@@ -706,8 +790,10 @@ class Game(object):
     # Game mode pseudo-constants
     MODE_INTRO = 1  # Opening screen. Pressing SPACE starts the game
     MODE_GAME  = 2  # Main game
-    MODE_OUTRO = 3  # 'Game Over' screen
-    MODE_SCORE = 4  # Player is editing hi-score table
+    MODE_SCORE = 3  # Player is editing hi-score table
+    MODE_OUTRO = 4  # 'Game Over' screen
+    
+    player_name = ""
     
     def __init__(self):
         logging.basicConfig(filename='jangam.log', format='%(asctime)s %(message)s', level=logging.INFO)
@@ -718,6 +804,8 @@ class Game(object):
         # Prepare the main display
         self.display = pygame.display.set_mode((800, 800))
         pygame.display.set_caption("Jangam")
+        
+        self.hiscores = Hiscore()
         
         g_store.load("graphics")
         s_store.load("sounds")
@@ -730,8 +818,6 @@ class Game(object):
         """
         self.running = True
         
-        self.game_over = False
-        
         # Prepare the animations
         self.scrollers = []
         self.scrollers.append(ParallaxScroller(g_store["starfield_01a"], 0, 0, 0.1))
@@ -741,8 +827,6 @@ class Game(object):
         
         # Prepare the player's ship
         self.ship = Ship(400 - 32, SHIP_Y, pygame.Rect(0, SHIP_Y, 800 - 64, 64))
-        self.ship.collided = False
-        self.ship.game_over = False
 
         self.explosions = Explosions()
         
@@ -763,21 +847,53 @@ class Game(object):
         self.hull_label   = Label("%d %%" % self.ship.hull, SPEEDBAR_X, SPEEDBAR_Y + 32)
         self.shield_label = Label("%d" % self.ship.shield, SPEEDBAR_X, SPEEDBAR_Y + 48)
         
-        self.large_score_label = Label("Score: %d" % self.ship.score, 300, 32)
+        self.large_score_label = Label("Score: %d" % self.ship.score, 200, 32)
         self.large_score_label.set_font(os.path.join("graphics", "04B_03.ttf"), 48)
-    
+        
+        self.hiscore_edit = Label("Enter your name: _", 200, 420)
+        self.hiscore_edit.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
+
+        self.hiscore_labels = []
+        for i in range(0, 10):
+            label = Label("", 200, 320 + (i * 32))
+            label.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
+            self.hiscore_labels.append(label)
+            
         self.logo = g_store["logo"]
         
         self.end = g_store["game_over_01"]
         
         pygame.mixer.init(frequency=16000, size=-16, channels=1, buffer=4096)
         
+        self.reset()
+        
+    # --------------------------------------------------------------------------
+
+    def reset(self):
+        """
+        Resets the game to its starting parameters
+        """
+        self.ship.collided = False
+        self.ship.shield = 0
+        self.ship.hull = 100
+        self.ship.score = 0
+        self.ship.mining_units = 1
+        self.ship.total_mining_units = 1
+        self.ship.speed = 0
+        self.ship.thrust_left = 0
+        self.ship.thrust_right = 0
+        self.ship.rect.x = 400 - 32
+        
+        self.explosions.clear()
+        self.mines.clear()
+        self.asteroids.clear()
+        
         self.mode = self.MODE_INTRO
         
     # --------------------------------------------------------------------------
 
-    def on_keydown(self, key):
-        if not self.game_over:
+    def on_keydown(self, key, mods = None):
+        if self.mode == self.MODE_GAME:
             if key == K_LEFT:
                 self.ship.apply_thrust_left()
                 
@@ -791,11 +907,28 @@ class Game(object):
                 if self.ship.mining_units > 0:
                     position = Rect(self.ship.rect)
                     self.mines.launch(position)
+                    
+        elif self.mode == self.MODE_SCORE:
+            if key == K_BACKSPACE and self.player_name <> "":
+                self.player_name = self.player_name[:-2]
+            elif key == K_RETURN:
+                self.hiscores.add(self.player_name, self.ship.score)
+                self.hiscores.write()
+                self.mode = self.MODE_OUTRO
+                self.prepare_outro()
+            # If the user presses a valid character key
+            elif key >= 32 and key <= 126:
+                # If the user presses the shift key while pressing another character then capitalise it
+                if mods & KMOD_SHIFT:
+                    key -= 32
+                if len(self.player_name) < 10:
+                    self.player_name = self.player_name + chr(key)
+                self.hiscore_edit.text = "Enter your name: %s_" % self.player_name
             
     # --------------------------------------------------------------------------
 
     def on_keyup(self, key):
-        if not self.game_over:
+        if self.mode == self.MODE_GAME:
             if key == K_RIGHT:
                 self.ship.release_thrust_right()
                 
@@ -824,10 +957,17 @@ class Game(object):
             self.update_intro(current_time)
         elif self.mode == self.MODE_GAME:
             self.update_game(current_time)
+        elif self.mode == self.MODE_SCORE:
+            self.update_score(current_time)
+        elif self.mode == self.MODE_OUTRO:
+            self.update_outro(current_time)
 
     # --------------------------------------------------------------------------
 
     def update_intro(self, current_time):
+        """
+        Updates the intro scene
+        """
         for event in pygame.event.get():
             if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
                 self.running = False
@@ -837,6 +977,9 @@ class Game(object):
     # --------------------------------------------------------------------------
 
     def update_game(self, current_time):
+        """
+        Updates the main game scene
+        """
         # Update the ship position
         self.ship.update(current_time)
         
@@ -887,31 +1030,33 @@ class Game(object):
         
         self.mines.update(current_time)
 
-        if not self.game_over:
-            # Check for collisions with asteroids
-            collision = pygame.sprite.spritecollide(self.ship, self.asteroids.roids, True)
-            if collision:
-                # Show explosion
-                self.ship.collided = True
-                self.explosions.add(collision[0].rect)
-                # If the ship has shields, reduce them...
-                if self.ship.shield > 0:
-                    self.ship.shield = max(self.ship.shield - 25, 0)
-                else:
-                    # ...otherwise apply the damage directly to the hull
-                    self.ship.hull = self.ship.hull - 25
-                    # Announce the new hull status
-                    if self.ship.hull == 75:
-                        s_store["hull_integrity_75"].play()
-                    elif self.ship.hull == 50:
-                        s_store["hull_integrity_50"].play()
-                    elif self.ship.hull == 25:
-                        s_store["hull_integrity_25"].play()
-                    elif self.ship.hull <= 0:
-                        self.ship.hull = 0
-                        self.game_over = True
-                        self.ship.game_over = True
-                        s_store["game_over"].play()
+        # Check for collisions with asteroids
+        collision = pygame.sprite.spritecollide(self.ship, self.asteroids.roids, True)
+        if collision:
+            # Show explosion
+            self.ship.collided = True
+            self.explosions.add(collision[0].rect)
+            # If the ship has shields, reduce them...
+            if self.ship.shield > 0:
+                self.ship.shield = max(self.ship.shield - 25, 0)
+            else:
+                # ...otherwise apply the damage directly to the hull
+                self.ship.hull = self.ship.hull - 25
+                # Announce the new hull status
+                if self.ship.hull == 75:
+                    s_store["hull_integrity_75"].play()
+                elif self.ship.hull == 50:
+                    s_store["hull_integrity_50"].play()
+                elif self.ship.hull == 25:
+                    s_store["hull_integrity_25"].play()
+                elif self.ship.hull <= 0:
+                    self.ship.hull = 0
+                    if self.hiscores.position(self.ship.score) <> -1:
+                        self.mode = self.MODE_SCORE
+                    else:
+                        self.prepare_outro()
+                        self.mode = self.MODE_OUTRO
+                    s_store["game_over"].play()
 
         # Check for hitting asteroids or mines with weapon-fire
         """
@@ -964,6 +1109,36 @@ class Game(object):
                 pass
             
     # --------------------------------------------------------------------------
+
+    def update_score(self, current_time):
+        """
+        Updates the high-score edit scene
+        """
+        for event in pygame.event.get():
+            if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
+                self.running = False
+            elif (event.type == KEYDOWN):
+                self.on_keydown(event.key, pygame.key.get_mods())
+            
+    # --------------------------------------------------------------------------
+
+    def prepare_outro(self):
+        for i in range(0, len(self.hiscores.scores)):
+            self.hiscore_labels[i].text = '{0:.<12}{1:.>10d}'.format(self.hiscores.scores[i][1], self.hiscores.scores[i][0])
+            
+    # --------------------------------------------------------------------------
+
+    def update_outro(self, current_time):
+        """
+        Updates the ending scene
+        """
+        for event in pygame.event.get():
+            if event.type == QUIT or (event.type == KEYUP and event.key == K_ESCAPE):
+                self.running = False
+            elif event.type == KEYUP and event.key == K_SPACE:
+                self.reset()
+            
+    # --------------------------------------------------------------------------
     
     def draw(self):
         """
@@ -975,7 +1150,8 @@ class Game(object):
 
         if self.mode == self.MODE_INTRO:
             # Draw the logo
-            self.display.blit(self.logo, [200, 100])
+            self.display.blit(self.logo, [0, 0])
+            
         elif self.mode == self.MODE_GAME:
             
             # Draw any active explosions
@@ -989,12 +1165,20 @@ class Game(object):
     
             # Draw any active weapon fire
             self.weapon.draw(self.display)
+
+            # Draw the ship
+            self.ship.draw(self.display)
             
-            if self.game_over:
-                self.display.blit(self.end, [200, 300])            
-            else:
-                # Draw the ship
-                self.ship.draw(self.display)
+        elif self.mode == self.MODE_OUTRO:
+            
+            self.display.blit(self.end, [200, 100])
+            for label in self.hiscore_labels:
+                label.draw(self.display)
+
+        elif self.mode == self.MODE_SCORE:
+            
+            self.display.blit(self.end, [200, 100])
+            self.hiscore_edit.draw(self.display)
             
         # Update the UI
         self.display.blit(self.overlay, [0, 0])
@@ -1004,8 +1188,9 @@ class Game(object):
         self.mine_label.draw(self.display)
         self.hull_label.draw(self.display)
         self.shield_label.draw(self.display)
-        
-        self.large_score_label.draw(self.display)
+
+        if self.mode in [self.MODE_GAME, self.MODE_SCORE]:
+            self.large_score_label.draw(self.display)
         
         # Update the display
         pygame.display.update()
@@ -1029,4 +1214,10 @@ class Game(object):
         Cleans up before the application closes.
         """
         pygame.quit()
+
+if __name__ == "__main__":
+    test = Hiscore()
+
+    for i in range(0, len(test.scores)):
+        print '{0:.<12}{1:.>10d}'.format(test.scores[i][1], test.scores[i][0])
 
