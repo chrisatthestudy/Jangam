@@ -60,6 +60,12 @@ class SoundStore(object):
             key, ext = os.path.splitext(os.path.basename(soundfile))
             self.items[key] = sound
             
+        self.items["mining"].set_volume(0.25)
+
+    def play(self, sound_name, loops = 0):
+        channel = pygame.mixer.find_channel(True)
+        channel.play(self.items[sound_name], loops)
+        
     def __getitem__(self, key):
         return self.items[key]
 
@@ -90,13 +96,15 @@ class Label(object):
     the draw() method.
     """
     
-    def __init__(self, text, x, y):
-        self.set_font(os.path.join("graphics", "04B_03.ttf"), 16)
+    _text = ""
+    
+    def __init__(self, text, x, y, colour = pygame.color.Color('#cfa100')):
         self.margin = 0
-        self.text = text
-        self.colour = pygame.color.Color('#cfa100')
         self.x = x
         self.y = y
+        self.colour = colour
+        self._text = text
+        self.set_font(os.path.join("graphics", "04B_03.ttf"), 16)
         
     def draw(self, surface):
         """
@@ -107,8 +115,7 @@ class Label(object):
         
         if self.text != "":
             # Render the caption
-            caption_surface = self.font.render(self.text, True, self.colour)
-            surface.blit(caption_surface, (self.x, self.y))
+            surface.blit(self.image, (self.x, self.y))
 
     def set_font(self, name, size):
         self.fontname = name
@@ -117,7 +124,17 @@ class Label(object):
             self.font = pygame.font.Font(None, self.fontsize)
         else:
             self.font = pygame.font.Font(self.fontname, self.fontsize)
+        self.image = self.font.render(self.text, True, self.colour)
 
+    def get_text(self):
+        return self._text
+        
+    def set_text(self, new_text):
+        self._text = new_text
+        self.image = self.font.render(self.text, True, self.colour)
+        
+    text = property(get_text, set_text)
+    
 class ParallaxScroller(object):
     """
     Implements a vertically scrolling area of the screen, wrapping around at the 
@@ -510,6 +527,7 @@ class Mine(FrameSprite):
         self.clouds.visible = True
 
     def remove(self, destroyed = False):
+        s_store["mining"].stop()
         self.ship.mining_units = self.ship.mining_units + 1
         if self.asteroid:
             if not destroyed:
@@ -681,13 +699,13 @@ class Ship(FrameSprite):
         if value == 5:
             self.mining_units = self.mining_units + 1
             self.total_mining_units = self.total_mining_units + 1
-            s_store["new_mining_unit"].play()
+            s_store.play("new_mining_unit")
         elif value == 6:
             self.shield = min(self.shield + 25, 100)
-            s_store["shield_enhanced"].play()
+            s_store.play("shield_enhanced")
         elif value == 7:
             self.hull = min(self.hull + 25, 100)
-            s_store["hull_integrity_restored"].play()
+            s_store.play("hull_integrity_restored")
         
     def stop(self):
         self.thrust_left = 0
@@ -799,6 +817,7 @@ class Game(object):
         logging.basicConfig(filename='jangam.log', format='%(asctime)s %(message)s', level=logging.INFO)
         
         os.environ['SDL_VIDEO_CENTERED'] = '1'
+        pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=4096)
         pygame.init()
         
         # Prepare the main display
@@ -853,17 +872,23 @@ class Game(object):
         self.hiscore_edit = Label("Enter your name: _", 200, 420)
         self.hiscore_edit.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
 
+        self.hiscore_title = Label("High Scores", 300, 260, pygame.color.Color('#990000'))
+        self.hiscore_title.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
+        
         self.hiscore_labels = []
         for i in range(0, 10):
-            label = Label("", 200, 320 + (i * 32))
-            label.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
-            self.hiscore_labels.append(label)
-            
+            y = 320 + (i * 32)
+            player_label = Label("", 248, y)
+            score_label  = Label("", 544, y)
+            player_label.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
+            score_label.set_font(os.path.join("graphics", "04B_03.ttf"), 32)
+            self.hiscore_labels.append([player_label, score_label])
+
+        self.replay_label = Label("Press SPACE to play again, or ESC to exit", 232, 672, pygame.color.Color('#ffffff'))
+        
         self.logo = g_store["logo"]
         
         self.end = g_store["game_over_01"]
-        
-        pygame.mixer.init(frequency=16000, size=-16, channels=1, buffer=4096)
         
         self.reset()
         
@@ -982,7 +1007,7 @@ class Game(object):
         """
         # Update the ship position
         self.ship.update(current_time)
-        
+
         self.score_label.text  = "%d" % self.ship.score
         self.mine_label.text   = "%d" % self.ship.mining_units
         self.hull_label.text   = "%d %%" % self.ship.hull
@@ -1036,6 +1061,7 @@ class Game(object):
             # Show explosion
             self.ship.collided = True
             self.explosions.add(collision[0].rect)
+            s_store.play("explosion")
             # If the ship has shields, reduce them...
             if self.ship.shield > 0:
                 self.ship.shield = max(self.ship.shield - 25, 0)
@@ -1043,20 +1069,23 @@ class Game(object):
                 # ...otherwise apply the damage directly to the hull
                 self.ship.hull = self.ship.hull - 25
                 # Announce the new hull status
+                """
                 if self.ship.hull == 75:
-                    s_store["hull_integrity_75"].play()
+                    s_store.play("hull_integrity_75")
                 elif self.ship.hull == 50:
-                    s_store["hull_integrity_50"].play()
+                    s_store.play("hull_integrity_50")
                 elif self.ship.hull == 25:
-                    s_store["hull_integrity_25"].play()
-                elif self.ship.hull <= 0:
+                    s_store.play("hull_integrity_25")
+                """
+                if self.ship.hull <= 0:
                     self.ship.hull = 0
                     if self.hiscores.position(self.ship.score) <> -1:
                         self.mode = self.MODE_SCORE
                     else:
                         self.prepare_outro()
                         self.mode = self.MODE_OUTRO
-                    s_store["game_over"].play()
+                    pygame.mixer.stop()
+                    s_store.play("game_over")
 
         # Check for hitting asteroids or mines with weapon-fire
         """
@@ -1079,13 +1108,16 @@ class Game(object):
             collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False)
             for roid in collision:
                 if mine.is_mining and not roid.being_mined:
+                    s_store["mining"].stop()
+                    s_store.play("explosion")
                     self.explosions.add(mine.rect)
                     mine.remove(True)
-                else:
+                elif not mine.is_mining:
                     roid.being_mined = True
                     mine.rect.left = roid.rect.left + 20
                     mine.rect.top  = roid.rect.top + roid.rect.height - 8
                     mine.asteroid = roid
+                    s_store.play("mining", 2)
                     mine.start_mining()
         
         self.explosions.update(current_time)
@@ -1107,6 +1139,9 @@ class Game(object):
             elif event.type == MOUSEMOTION:
                 # self.mouse_moved(pygame.mouse.get_pos())
                 pass
+
+        if self.ship.mining_units == self.ship.total_mining_units:
+            s_store["mining"].stop()
             
     # --------------------------------------------------------------------------
 
@@ -1124,7 +1159,10 @@ class Game(object):
 
     def prepare_outro(self):
         for i in range(0, len(self.hiscores.scores)):
-            self.hiscore_labels[i].text = '{0:.<12}{1:.>10d}'.format(self.hiscores.scores[i][1], self.hiscores.scores[i][0])
+            label = self.hiscore_labels[i]
+            label[0].text = '{:.<12}'.format(self.hiscores.scores[i][1])
+            label[1].text = '{:.>10d}'.format(self.hiscores.scores[i][0])
+            label[1].x = 560 - label[1].image.get_width()
             
     # --------------------------------------------------------------------------
 
@@ -1172,8 +1210,11 @@ class Game(object):
         elif self.mode == self.MODE_OUTRO:
             
             self.display.blit(self.end, [200, 100])
+            self.hiscore_title.draw(self.display)
             for label in self.hiscore_labels:
-                label.draw(self.display)
+                label[0].draw(self.display)
+                label[1].draw(self.display)
+            self.replay_label.draw(self.display)
 
         elif self.mode == self.MODE_SCORE:
             
