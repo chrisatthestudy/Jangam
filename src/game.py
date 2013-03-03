@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# http://bit.ly/11JW0pC
+
 import os
 import os.path
 import re
@@ -370,84 +372,6 @@ class Asteroids(object):
     def on_roid_die(self, roid):
         self.roids.remove(roid)
         
-class Pulse(FrameSprite):
-    """
-    Pulse sprites represent weapon-fire (see the WeaponFire class below). For
-    this game weapon-fire is always assumed to travel vertically.
-    """
-    
-    def __init__(self, on_die):
-        FrameSprite.__init__(self, g_store["weapon_02"], 10)
-
-        # Set the default position, at the front of the ship (the X co-ordinate
-        # representing the ship position will be set via the WeaponFire class).
-        self.rect = Rect(0, SHIP_Y, 8, 8)
-
-        # The speed of each pulse is randomised slightly for a better visual
-        # effect (without this the pulses look like a fixed line, because they
-        # always occupy the same vertical positions).
-        self.speed = 12 + random.randint(0, 4)
-        
-        self.next_update_time = 0 # update() hasn't been called yet.
-        
-        self.on_die = on_die
-        
-    def update(self, current_time):
-        FrameSprite.update(self, current_time)
-                
-        if self.next_update_time < current_time:
-
-            # Move us up the screen
-            self.rect.top -= self.speed
-            
-            if self.rect.top < -8:
-                self.on_die(self)
-                
-            self.next_update_time = current_time + 1
-
-class WeaponFire(object):
-    """
-    Base class for handling weapon-fire, using the Pulse class (above) for the
-    sprites that represent the visible appearance. The WeaponFire class is
-    passed the name of the sprite image to use for the pulses, so this same
-    class can be used for different weapons.
-    
-    REFACTOR: allow this class to use different Pulse classes providing 
-              different behaviours.
-    """
-
-    # Position is the point from which the weapon pulses will emanate. This
-    # must be set externally before the weapon is fired.
-    position = 0
-    firing = False
-    
-    def __init__(self):
-        # Always start with the weapon inactive
-        self.firing = False
-        
-        # Store the 'pulse' sprites in a sprite group for efficiency
-        self.pulses = pygame.sprite.Group()
-        
-    def update(self, current_time):
-        if self.firing:
-            # Create another pulse, place it at the current weapon position, and
-            # add it to the sprite group.
-            pulse = Pulse(self.on_pulse_die)
-            pulse.rect.left = self.position
-            self.pulses.add(pulse)
-        # Update any existing pulses            
-        self.pulses.update(current_time)
-    
-    def draw(self, target):
-        # Update the 'pulses' sprite-group (this will redraw all the sprites in
-        # the group)
-        rectlist = self.pulses.draw(target)
-        pygame.display.update(rectlist)
-
-    def on_pulse_die(self, pulse):
-        # The pulse has gone off-screen, so remove it
-        self.pulses.remove(pulse)
-
 class Mine(FrameSprite):
     """
     Sprite for the asteroid-miner.
@@ -591,12 +515,11 @@ class Burst(FrameSprite):
 
 class Explosions(object):
     """
-    A class for handling explosions in the game. This works very similarly to
-    the WeaponFire class, except that the sprites that it handles to not move.
+    A class for handling explosions in the game.
     """
 
-    # Position is the point from which the weapon pulses will emanate. This
-    # must be set externally before the weapon is fired.
+    # Position is the point from which the explosion pulses will emanate. This
+    # must be set externally before the explosion is triggered.
     position = 0
     
     def __init__(self):
@@ -849,9 +772,6 @@ class Game(object):
 
         self.explosions = Explosions()
         
-        self.weapon = WeaponFire()
-        self.weapon.firing = False
-        
         self.mines = MineController(self.ship)
         
         # Prepare the asteroids
@@ -925,9 +845,6 @@ class Game(object):
             if key == K_RIGHT:
                 self.ship.apply_thrust_right()
                     
-            # if key == K_z:
-            #    self.weapon.firing = True
-
             if key == K_UP:
                 if self.ship.mining_units > 0:
                     position = Rect(self.ship.rect)
@@ -960,9 +877,6 @@ class Game(object):
             if key == K_LEFT:
                 self.ship.release_thrust_left()
                 
-            if key == K_z:
-                self.weapon.firing = False        
-        
     # --------------------------------------------------------------------------
 
     def update(self):
@@ -1046,13 +960,6 @@ class Game(object):
         # Update the asteroid positions
         self.asteroids.update(current_time)
         
-        # Update any weapon fire. Set the position so that the weapon-fire
-        # appears from the middle of the ship
-        """
-        self.weapon.position = self.ship.rect.left + 32 - 4
-        self.weapon.update(current_time)
-        """
-        
         self.mines.update(current_time)
 
         # Check for collisions with asteroids
@@ -1087,22 +994,6 @@ class Game(object):
                     pygame.mixer.stop()
                     s_store.play("game_over")
 
-        # Check for hitting asteroids or mines with weapon-fire
-        """
-        for pulse in self.weapon.pulses:
-            collision = pygame.sprite.spritecollide(pulse, self.asteroids.roids, True)
-            if collision:
-                for sprite in collision:
-                    # Show explosion
-                    self.explosions.add(sprite.rect)
-            collision = pygame.sprite.spritecollide(pulse, self.mines.mines, False)
-            if collision:
-                for sprite in collision:
-                    # Show explosion
-                    self.explosions.add(sprite.rect)
-                    sprite.remove()
-        """
-        
         # Check for hitting asteroids with a miner
         for mine in self.mines.mines:
             collision = pygame.sprite.spritecollide(mine, self.asteroids.roids, False)
@@ -1201,9 +1092,6 @@ class Game(object):
             # Draw any active mines
             self.mines.draw(self.display)
     
-            # Draw any active weapon fire
-            self.weapon.draw(self.display)
-
             # Draw the ship
             self.ship.draw(self.display)
             
